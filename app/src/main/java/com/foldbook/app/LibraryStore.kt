@@ -12,6 +12,7 @@ data class LibraryBook(
 object LibraryStore {
     private const val PREFS = "foldbook_library"
     private const val KEY_FOLDER_URI = "book_folder_uri"
+    private const val KEY_PROGRESS_PREFIX = "reading_progress_"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -26,6 +27,32 @@ object LibraryStore {
             ?: return null
 
         return runCatching { Uri.parse(value) }.getOrNull()
+    }
+
+    fun saveProgress(
+        context: Context,
+        bookUri: String,
+        pageIndex: Int
+    ) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(progressKey(bookUri), pageIndex.coerceAtLeast(0))
+            .apply()
+    }
+
+    fun readProgress(
+        context: Context,
+        bookUri: String,
+        lastPageIndex: Int
+    ): Int {
+        val saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(progressKey(bookUri), 0)
+
+        return saved.coerceIn(0, lastPageIndex.coerceAtLeast(0))
+    }
+
+    private fun progressKey(bookUri: String): String {
+        return KEY_PROGRESS_PREFIX + bookUri.hashCode().toString()
     }
 
     fun scanFolder(context: Context, treeUri: Uri): List<LibraryBook> {
