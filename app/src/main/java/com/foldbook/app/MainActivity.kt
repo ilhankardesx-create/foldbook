@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
+import androidx.window.layout.WindowLayoutInfo
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,12 +57,11 @@ class MainActivity : ComponentActivity() {
             val tracker = remember { WindowInfoTracker.getOrCreate(this@MainActivity) }
             val layoutInfo by tracker
                 .windowLayoutInfo(this@MainActivity)
-                .collectAsState(initial = null)
+                .collectAsState(initial = WindowLayoutInfo(emptyList()))
 
-            val foldingFeature = layoutInfo
-                ?.displayFeatures
-                ?.filterIsInstance<FoldingFeature>()
-                ?.firstOrNull()
+            val foldingFeature = layoutInfo.displayFeatures
+                .filterIsInstance<FoldingFeature>()
+                .firstOrNull()
 
             FoldBookTheme {
                 FoldBookReader(
@@ -187,12 +187,8 @@ private fun BookSpread(
 
     fun finishDrag() {
         when {
-            forwardProgress > 0.24f && pageIndex + step <= demoPages.lastIndex -> {
-                pageIndex += step
-            }
-            backwardProgress > 0.24f && pageIndex - step >= 0 -> {
-                pageIndex -= step
-            }
+            forwardProgress > 0.24f && pageIndex + step <= demoPages.lastIndex -> pageIndex += step
+            backwardProgress > 0.24f && pageIndex - step >= 0 -> pageIndex -= step
         }
         dragPx = 0f
     }
