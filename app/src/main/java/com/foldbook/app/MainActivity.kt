@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,6 +52,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -57,7 +62,9 @@ import androidx.compose.ui.zIndex
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
@@ -104,7 +111,7 @@ private data class DemoPage(
     val body: String
 )
 
-private val demoPages = listOf(
+private val samplePages = listOf(
     DemoPage(
         "Bölüm 1 — Başlangıç",
         "FoldBook, katlanabilir telefon açıkken gerçek bir kitabın iki karşılıklı sayfası gibi davranmak için tasarlandı. Parmağını sağ sayfada sola doğru sürükle."
@@ -139,8 +146,102 @@ private val demoPages = listOf(
     )
 )
 
+private fun EpubBook.toReaderPages(): List<DemoPage> {
+    return chapters.flatMap { chapter ->
+        paginateText(chapter.text).mapIndexed { pageIndex, body ->
+            DemoPage(
+                chapter = if (pageIndex == 0) chapter.title else "",
+                body = body
+            )
+        }
+    }
+}
+
+private fun paginateText(text: String, maxChars: Int = 520): List<String> {
+    val normalized = text
+        .replace("\r", "")
+        .replace(Regex("[ \\t]+"), " ")
+        .trim()
+
+    if (normalized.isBlank()) return emptyList()
+
+    val paragraphs = normalized
+        .split(Regex("\\n{2,}"))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+    val pages = mutableListOf<String>()
+    val current = StringBuilder()
+
+    fun flush() {
+        if (current.isNotBlank()) {
+            pages += current.toString().trim()
+            current.clear()
+        }
+    }
+
+    for (paragraph in paragraphs) {
+        val words = paragraph.split(Regex("\\s+"))
+        for (word in words) {
+            if (current.length + word.length + 1 > maxChars && current.isNotBlank()) {
+                flush()
+            }
+            if (current.isNotEmpty()) current.append(' ')
+            current.append(word)
+        }
+
+        if (current.length > maxChars * 0.72f) {
+            flush()
+        } else if (current.isNotEmpty()) {
+            current.append("\n\n")
+        }
+    }
+
+    flush()
+    return pages
+}
+
 @Composable
 private fun FoldBookReader(hasSeparatingVerticalHinge: Boolean) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var pages by remember { mutableStateOf(samplePages) }
+    var bookTitle by remember { mutableStateOf("FoldBook") }
+    var bookKey by remember { mutableStateOf("sample") }
+    var isLoading by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    val epubPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                isLoading = true
+                loadError = null
+
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        EpubLoader.load(context, uri)
+                    }
+                }.onSuccess { book ->
+                    val importedPages = book.toReaderPages()
+                    if (importedPages.isEmpty()) {
+                        loadError = "Bu EPUB içinde okunabilir metin bulunamadı."
+                    } else {
+                        pages = importedPages
+                        bookTitle = book.title.ifBlank { "EPUB Kitap" }
+                        bookKey = uri.toString()
+                    }
+                }.onFailure {
+                    loadError = it.message ?: "EPUB açılamadı."
+                }
+
+                isLoading = false
+            }
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -150,7 +251,27 @@ private fun FoldBookReader(hasSeparatingVerticalHinge: Boolean) {
                 .fillMaxSize()
                 .padding(top = 28.dp, bottom = 18.dp)
         ) {
-            ReaderHeader()
+            ReaderHeader(
+                title = bookTitle,
+                isLoading = isLoading,
+                onOpenBook = {
+                    epubPicker.launch(
+                        arrayOf(
+                            "application/epub+zip",
+                            "application/octet-stream"
+                        )
+                    )
+                }
+            )
+
+            loadError?.let { message ->
+                Text(
+                    text = message,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
 
             BoxWithConstraints(
                 modifier = Modifier
@@ -160,6 +281,8 @@ private fun FoldBookReader(hasSeparatingVerticalHinge: Boolean) {
                 val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
 
                 BookSpread(
+                    pages = pages,
+                    bookKey = bookKey,
                     twoPage = twoPage,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -169,22 +292,38 @@ private fun FoldBookReader(hasSeparatingVerticalHinge: Boolean) {
 }
 
 @Composable
-private fun ReaderHeader() {
+private fun ReaderHeader(
+    title: String,
+    isLoading: Boolean,
+    onOpenBook: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "FoldBook",
-            fontSize = 25.sp,
+            text = title,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
         )
-        Spacer(Modifier.weight(1f))
+
+        Button(
+            onClick = onOpenBook,
+            enabled = !isLoading
+        ) {
+            Text(if (isLoading) "Açılıyor…" else "EPUB Aç")
+        }
+
+        Spacer(Modifier.width(10.dp))
+
         Text(
-            text = "v0.2",
+            text = "v0.3",
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary
@@ -194,6 +333,8 @@ private fun ReaderHeader() {
 
 @Composable
 private fun BookSpread(
+    pages: List<DemoPage>,
+    bookKey: String,
     twoPage: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -210,7 +351,7 @@ private fun BookSpread(
     val progress = if (settling) settleAnimation.value else dragProgress
 
     fun canTurn(direction: Int): Boolean = when (direction) {
-        1 -> pageIndex + step <= demoPages.lastIndex
+        1 -> pageIndex + step <= pages.lastIndex
         -1 -> pageIndex - step >= 0
         else -> false
     }
@@ -241,6 +382,13 @@ private fun BookSpread(
             settleAnimation.snapTo(0f)
             settling = false
         }
+    }
+
+    LaunchedEffect(bookKey) {
+        pageIndex = 0
+        dragPx = 0f
+        dragProgress = 0f
+        turnDirection = 0
     }
 
     LaunchedEffect(twoPage) {
@@ -297,12 +445,14 @@ private fun BookSpread(
     ) {
         if (twoPage) {
             TwoPageSpread(
+                pages = pages,
                 pageIndex = pageIndex,
                 turnDirection = turnDirection,
                 progress = progress
             )
         } else {
             SinglePageSpread(
+                pages = pages,
                 pageIndex = pageIndex,
                 turnDirection = turnDirection,
                 progress = progress
@@ -313,6 +463,7 @@ private fun BookSpread(
 
 @Composable
 private fun TwoPageSpread(
+    pages: List<DemoPage>,
     pageIndex: Int,
     turnDirection: Int,
     progress: Float
@@ -332,9 +483,9 @@ private fun TwoPageSpread(
                 .padding(vertical = 20.dp)
         ) {
             val leftPage = if (isBackward) {
-                demoPages.getOrNull(pageIndex - 2)
+                pages.getOrNull(pageIndex - 2)
             } else {
-                demoPages.getOrNull(pageIndex)
+                pages.getOrNull(pageIndex)
             }
             val leftNumber = if (isBackward) pageIndex - 1 else pageIndex + 1
 
@@ -346,9 +497,9 @@ private fun TwoPageSpread(
 
             if (isBackward) {
                 TurningPage(
-                    frontPage = demoPages.getOrNull(pageIndex),
+                    frontPage = pages.getOrNull(pageIndex),
                     frontNumber = pageIndex + 1,
-                    backPage = demoPages.getOrNull(pageIndex - 1),
+                    backPage = pages.getOrNull(pageIndex - 1),
                     backNumber = pageIndex,
                     progress = progress,
                     direction = -1,
@@ -368,9 +519,9 @@ private fun TwoPageSpread(
                 .padding(vertical = 20.dp)
         ) {
             val rightPage = if (isForward) {
-                demoPages.getOrNull(pageIndex + 3)
+                pages.getOrNull(pageIndex + 3)
             } else {
-                demoPages.getOrNull(pageIndex + 1)
+                pages.getOrNull(pageIndex + 1)
             }
             val rightNumber = if (isForward) pageIndex + 4 else pageIndex + 2
 
@@ -382,9 +533,9 @@ private fun TwoPageSpread(
 
             if (isForward) {
                 TurningPage(
-                    frontPage = demoPages.getOrNull(pageIndex + 1),
+                    frontPage = pages.getOrNull(pageIndex + 1),
                     frontNumber = pageIndex + 2,
-                    backPage = demoPages.getOrNull(pageIndex + 2),
+                    backPage = pages.getOrNull(pageIndex + 2),
                     backNumber = pageIndex + 3,
                     progress = progress,
                     direction = 1,
@@ -399,6 +550,7 @@ private fun TwoPageSpread(
 
 @Composable
 private fun SinglePageSpread(
+    pages: List<DemoPage>,
     pageIndex: Int,
     turnDirection: Int,
     progress: Float
@@ -415,14 +567,14 @@ private fun SinglePageSpread(
             .padding(vertical = 20.dp)
     ) {
         BookPage(
-            page = demoPages.getOrNull(targetIndex),
+            page = pages.getOrNull(targetIndex),
             pageNumber = targetIndex + 1,
             modifier = Modifier.fillMaxSize()
         )
 
         if (turnDirection != 0) {
             TurningPage(
-                frontPage = demoPages.getOrNull(pageIndex),
+                frontPage = pages.getOrNull(pageIndex),
                 frontNumber = pageIndex + 1,
                 backPage = null,
                 backNumber = 0,
