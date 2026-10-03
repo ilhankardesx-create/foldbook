@@ -1,10 +1,13 @@
 package com.foldbook.app
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -13,11 +16,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,11 +29,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,9 +61,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -83,7 +92,7 @@ class MainActivity : ComponentActivity() {
                 .firstOrNull()
 
             FoldBookTheme {
-                FoldBookReader(
+                FoldBookApp(
                     hasSeparatingVerticalHinge = foldingFeature?.let {
                         it.orientation == FoldingFeature.Orientation.VERTICAL && it.isSeparating
                     } == true
@@ -106,50 +115,15 @@ private fun FoldBookTheme(content: @Composable () -> Unit) {
     )
 }
 
-private data class DemoPage(
+private data class ReaderPage(
     val chapter: String,
     val body: String
 )
 
-private val samplePages = listOf(
-    DemoPage(
-        "Bölüm 1 — Başlangıç",
-        "FoldBook, katlanabilir telefon açıkken gerçek bir kitabın iki karşılıklı sayfası gibi davranmak için tasarlandı. Parmağını sağ sayfada sola doğru sürükle."
-    ),
-    DemoPage(
-        "İki Sayfalı Okuma",
-        "Ekran genişlediğinde içerik otomatik olarak iki sayfaya ayrılır. Dikey ve ayırıcı bir menteşe algılanırsa kitap düzeni özellikle korunur."
-    ),
-    DemoPage(
-        "Yeni Sayfa Motoru",
-        "Sayfayı çevirirken hareket artık parmağını takip ediyor. Bıraktığında sayfa eşik noktasına göre yumuşakça tamamlanıyor veya eski yerine dönüyor."
-    ),
-    DemoPage(
-        "Kağıdın Arka Yüzü",
-        "Sayfa yarıyı geçince arka yüzü görünür ve sıradaki yaprağın içeriğine dönüşür. Orta çizgideki gölge de hareketle birlikte değişir."
-    ),
-    DemoPage(
-        "Kapalı Telefon",
-        "Telefon kapalı veya dar ekrandayken tek sayfa görünür. Aynı kaydırma hareketiyle bir sonraki ya da önceki sayfaya geçilir."
-    ),
-    DemoPage(
-        "Sıradaki Adım",
-        "Bu temel hazır olduğunda EPUB içe aktarma, kütüphane görünümü, yazı tipi ayarları ve gerçek kitap dosyalarını okuma özellikleri eklenecek."
-    ),
-    DemoPage(
-        "FoldBook",
-        "Amaç basit: Fold cihaz açıldığında ekrana bakmak yerine elinde gerçekten açık bir kitap varmış hissini vermek."
-    ),
-    DemoPage(
-        "Prototip 0.2",
-        "Bu sürümde ileri ve geri sayfa hareketi, çift sayfalı düzen ve daha güçlü derinlik hissi birlikte çalışıyor."
-    )
-)
-
-private fun EpubBook.toReaderPages(): List<DemoPage> {
+private fun EpubBook.toReaderPages(): List<ReaderPage> {
     return chapters.flatMap { chapter ->
         paginateText(chapter.text).mapIndexed { pageIndex, body ->
-            DemoPage(
+            ReaderPage(
                 chapter = if (pageIndex == 0) chapter.title else "",
                 body = body
             )
@@ -157,7 +131,7 @@ private fun EpubBook.toReaderPages(): List<DemoPage> {
     }
 }
 
-private fun paginateText(text: String, maxChars: Int = 520): List<String> {
+private fun paginateText(text: String, maxChars: Int = 610): List<String> {
     val normalized = text
         .replace("\r", "")
         .replace(Regex("[ \\t]+"), " ")
@@ -182,15 +156,17 @@ private fun paginateText(text: String, maxChars: Int = 520): List<String> {
 
     for (paragraph in paragraphs) {
         val words = paragraph.split(Regex("\\s+"))
+
         for (word in words) {
             if (current.length + word.length + 1 > maxChars && current.isNotBlank()) {
                 flush()
             }
+
             if (current.isNotEmpty()) current.append(' ')
             current.append(word)
         }
 
-        if (current.length > maxChars * 0.72f) {
+        if (current.length > maxChars * 0.76f) {
             flush()
         } else if (current.isNotEmpty()) {
             current.append("\n\n")
@@ -202,46 +178,121 @@ private fun paginateText(text: String, maxChars: Int = 520): List<String> {
 }
 
 @Composable
-private fun FoldBookReader(hasSeparatingVerticalHinge: Boolean) {
+private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var pages by remember { mutableStateOf(samplePages) }
-    var bookTitle by remember { mutableStateOf("FoldBook") }
-    var bookKey by remember { mutableStateOf("sample") }
-    var isLoading by remember { mutableStateOf(false) }
-    var loadError by remember { mutableStateOf<String?>(null) }
+    var library by remember { mutableStateOf<List<LibraryBook>>(emptyList()) }
+    var libraryLoading by remember { mutableStateOf(false) }
+    var libraryError by remember { mutableStateOf<String?>(null) }
 
-    val epubPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                isLoading = true
-                loadError = null
+    var reading by remember { mutableStateOf(false) }
+    var readerLoading by remember { mutableStateOf(false) }
+    var readerError by remember { mutableStateOf<String?>(null) }
+    var readerTitle by remember { mutableStateOf("") }
+    var readerKey by remember { mutableStateOf("") }
+    var readerPages by remember { mutableStateOf<List<ReaderPage>>(emptyList()) }
 
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        EpubLoader.load(context, uri)
-                    }
-                }.onSuccess { book ->
-                    val importedPages = book.toReaderPages()
-                    if (importedPages.isEmpty()) {
-                        loadError = "Bu EPUB içinde okunabilir metin bulunamadı."
-                    } else {
-                        pages = importedPages
-                        bookTitle = book.title.ifBlank { "EPUB Kitap" }
-                        bookKey = uri.toString()
-                    }
-                }.onFailure {
-                    loadError = it.message ?: "EPUB açılamadı."
+    fun scanFolder(uri: Uri) {
+        scope.launch {
+            libraryLoading = true
+            libraryError = null
+
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    LibraryStore.scanFolder(context, uri)
                 }
-
-                isLoading = false
+            }.onSuccess {
+                library = it
+            }.onFailure {
+                libraryError = it.message ?: "Kitap klasörü okunamadı."
             }
+
+            libraryLoading = false
         }
     }
 
+    fun openBook(book: LibraryBook) {
+        scope.launch {
+            readerLoading = true
+            readerError = null
+
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    EpubLoader.load(context, Uri.parse(book.uri))
+                }
+            }.onSuccess { epub ->
+                val pages = epub.toReaderPages()
+                if (pages.isEmpty()) {
+                    readerError = "Bu EPUB içinde okunabilir metin bulunamadı."
+                } else {
+                    readerPages = pages
+                    readerTitle = epub.title.ifBlank { book.title }
+                    readerKey = book.uri
+                    reading = true
+                }
+            }.onFailure {
+                readerError = it.message ?: "Kitap açılamadı."
+            }
+
+            readerLoading = false
+        }
+    }
+
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            LibraryStore.saveFolder(context, uri)
+            scanFolder(uri)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        LibraryStore.savedFolder(context)?.let { scanFolder(it) }
+    }
+
+    BackHandler(enabled = reading) {
+        reading = false
+        readerError = null
+    }
+
+    if (reading) {
+        ReaderScreen(
+            title = readerTitle,
+            pages = readerPages,
+            bookKey = readerKey,
+            hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
+            onBack = {
+                reading = false
+                readerError = null
+            }
+        )
+    } else {
+        LibraryScreen(
+            books = library,
+            isLoading = libraryLoading || readerLoading,
+            error = libraryError ?: readerError,
+            onChooseFolder = { folderPicker.launch(null) },
+            onBookClick = ::openBook
+        )
+    }
+}
+
+@Composable
+private fun LibraryScreen(
+    books: List<LibraryBook>,
+    isLoading: Boolean,
+    error: String?,
+    onChooseFolder: () -> Unit,
+    onBookClick: (LibraryBook) -> Unit
+) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -249,34 +300,242 @@ private fun FoldBookReader(hasSeparatingVerticalHinge: Boolean) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 28.dp, bottom = 18.dp)
+                .padding(top = 28.dp)
         ) {
-            ReaderHeader(
-                title = bookTitle,
-                isLoading = isLoading,
-                onOpenBook = {
-                    epubPicker.launch(
-                        arrayOf(
-                            "application/epub+zip",
-                            "application/octet-stream"
-                        )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "📚 FoldBook",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Text(
+                        text = if (books.isEmpty()) {
+                            "Kütüphanen"
+                        } else {
+                            "${books.size} kitap rafında"
+                        },
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
                     )
                 }
-            )
 
-            loadError?.let { message ->
+                Button(
+                    onClick = onChooseFolder,
+                    enabled = !isLoading
+                ) {
+                    Text(if (isLoading) "Taranıyor…" else "Klasör Seç")
+                }
+
+                Spacer(Modifier.width(10.dp))
+
                 Text(
-                    text = message,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    text = "v0.4",
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.error
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
 
-            BoxWithConstraints(
+            error?.let {
+                Text(
+                    text = it,
+                    modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 13.sp
+                )
+            }
+
+            if (books.isEmpty() && !isLoading) {
+                EmptyLibrary(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    onChooseFolder = onChooseFolder
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 145.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 18.dp,
+                        end = 18.dp,
+                        top = 10.dp,
+                        bottom = 32.dp
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    items(
+                        items = books,
+                        key = { it.uri }
+                    ) { book ->
+                        ShelfBook(
+                            book = book,
+                            onClick = { onBookClick(book) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyLibrary(
+    modifier: Modifier = Modifier,
+    onChooseFolder: () -> Unit
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "📖",
+                fontSize = 64.sp
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = "Rafın henüz boş",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "EPUB kitaplarının bulunduğu klasörü bir kez seç. FoldBook klasörü hatırlayıp kitaplarını burada rafa dizecek.",
+                modifier = Modifier.fillMaxWidth(0.72f),
+                textAlign = TextAlign.Center,
+                fontSize = 15.sp,
+                lineHeight = 22.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f)
+            )
+
+            Spacer(Modifier.height(22.dp))
+
+            Button(onClick = onChooseFolder) {
+                Text("Kitap Klasörü Seç")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShelfBook(
+    book: LibraryBook,
+    onClick: () -> Unit
+) {
+    val covers = listOf(
+        Color(0xFF6D4937),
+        Color(0xFF425B4D),
+        Color(0xFF596779),
+        Color(0xFF77515C),
+        Color(0xFF79613F),
+        Color(0xFF4F526A)
+    )
+    val coverColor = covers[(book.title.hashCode() and Int.MAX_VALUE) % covers.size]
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.68f)
+                .shadow(9.dp, RoundedCornerShape(8.dp)),
+            shape = RoundedCornerShape(8.dp),
+            color = coverColor
+        ) {
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 14.dp)
+                    .padding(14.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(5.dp)
+                        .align(Alignment.CenterStart)
+                        .background(Color.Black.copy(alpha = 0.13f))
+                )
+
+                Text(
+                    text = book.title,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = 8.dp),
+                    textAlign = TextAlign.Center,
+                    maxLines = 6,
+                    overflow = TextOverflow.Ellipsis,
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    lineHeight = 21.sp,
+                    color = Color(0xFFFFF8EA)
+                )
+
+                Text(
+                    text = "EPUB",
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.68f)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(9.dp)
+                .shadow(5.dp, RoundedCornerShape(3.dp))
+                .background(
+                    Color(0xFF806044),
+                    RoundedCornerShape(3.dp)
+                )
+        )
+    }
+}
+
+@Composable
+private fun ReaderScreen(
+    title: String,
+    pages: List<ReaderPage>,
+    bookKey: String,
+    hasSeparatingVerticalHinge: Boolean,
+    onBack: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 24.dp, bottom = 4.dp)
+        ) {
+            ReaderTopBar(
+                title = title,
+                onBack = onBack
+            )
+
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
 
@@ -292,39 +551,41 @@ private fun FoldBookReader(hasSeparatingVerticalHinge: Boolean) {
 }
 
 @Composable
-private fun ReaderHeader(
+private fun ReaderTopBar(
     title: String,
-    isLoading: Boolean,
-    onOpenBook: () -> Unit
+    onBack: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        TextButton(onClick = onBack) {
+            Text(
+                text = "‹ Raf",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
         Text(
             text = title,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
         )
 
-        Button(
-            onClick = onOpenBook,
-            enabled = !isLoading
-        ) {
-            Text(if (isLoading) "Açılıyor…" else "EPUB Aç")
-        }
-
-        Spacer(Modifier.width(10.dp))
-
         Text(
-            text = "v0.3",
-            fontSize = 12.sp,
+            text = "v0.4",
+            modifier = Modifier.padding(end = 10.dp),
+            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary
         )
@@ -333,7 +594,7 @@ private fun ReaderHeader(
 
 @Composable
 private fun BookSpread(
-    pages: List<DemoPage>,
+    pages: List<ReaderPage>,
     bookKey: String,
     twoPage: Boolean,
     modifier: Modifier = Modifier
@@ -359,7 +620,8 @@ private fun BookSpread(
     fun settleTurn(cancelOnly: Boolean = false) {
         val direction = turnDirection
         val start = dragProgress
-        val shouldComplete = !cancelOnly && direction != 0 && canTurn(direction) && start >= 0.20f
+        val shouldComplete =
+            !cancelOnly && direction != 0 && canTurn(direction) && start >= 0.20f
 
         scope.launch {
             settling = true
@@ -395,6 +657,7 @@ private fun BookSpread(
         if (twoPage && pageIndex % 2 != 0) {
             pageIndex = (pageIndex - 1).coerceAtLeast(0)
         }
+
         dragPx = 0f
         dragProgress = 0f
         turnDirection = 0
@@ -415,6 +678,7 @@ private fun BookSpread(
                 },
                 onHorizontalDrag = { change, dragAmount ->
                     change.consume()
+
                     val proposed = (dragPx + dragAmount)
                         .coerceIn(-pageWidthPx, pageWidthPx)
 
@@ -429,7 +693,10 @@ private fun BookSpread(
                         turnDirection = direction
                         dragProgress = (abs(dragPx) / pageWidthPx).coerceIn(0f, 1f)
                     } else {
-                        dragPx = proposed.coerceIn(-pageWidthPx * 0.06f, pageWidthPx * 0.06f)
+                        dragPx = proposed.coerceIn(
+                            -pageWidthPx * 0.06f,
+                            pageWidthPx * 0.06f
+                        )
                         dragProgress = 0f
                         turnDirection = 0
                     }
@@ -463,7 +730,7 @@ private fun BookSpread(
 
 @Composable
 private fun TwoPageSpread(
-    pages: List<DemoPage>,
+    pages: List<ReaderPage>,
     pageIndex: Int,
     turnDirection: Int,
     progress: Float
@@ -480,7 +747,7 @@ private fun TwoPageSpread(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxSize()
-                .padding(vertical = 20.dp)
+                .padding(vertical = 4.dp)
         ) {
             val leftPage = if (isBackward) {
                 pages.getOrNull(pageIndex - 2)
@@ -516,7 +783,7 @@ private fun TwoPageSpread(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxSize()
-                .padding(vertical = 20.dp)
+                .padding(vertical = 4.dp)
         ) {
             val rightPage = if (isForward) {
                 pages.getOrNull(pageIndex + 3)
@@ -550,7 +817,7 @@ private fun TwoPageSpread(
 
 @Composable
 private fun SinglePageSpread(
-    pages: List<DemoPage>,
+    pages: List<ReaderPage>,
     pageIndex: Int,
     turnDirection: Int,
     progress: Float
@@ -564,7 +831,7 @@ private fun SinglePageSpread(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(vertical = 20.dp)
+            .padding(horizontal = 3.dp, vertical = 4.dp)
     ) {
         BookPage(
             page = pages.getOrNull(targetIndex),
@@ -590,9 +857,9 @@ private fun SinglePageSpread(
 
 @Composable
 private fun TurningPage(
-    frontPage: DemoPage?,
+    frontPage: ReaderPage?,
     frontNumber: Int,
-    backPage: DemoPage?,
+    backPage: ReaderPage?,
     backNumber: Int,
     progress: Float,
     direction: Int,
@@ -659,7 +926,7 @@ private fun BoxScope.PageEdgeShadow(
     Box(
         modifier = Modifier
             .fillMaxHeight()
-            .width(28.dp)
+            .width(26.dp)
             .align(if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd)
             .background(
                 Brush.horizontalGradient(
@@ -675,19 +942,20 @@ private fun BoxScope.PageEdgeShadow(
 
 @Composable
 private fun BookSpine(progress: Float) {
-    val shadowStrength = 0.08f + (0.10f * (1f - abs(0.5f - progress) * 2f))
+    val shadowStrength =
+        0.07f + (0.10f * (1f - abs(0.5f - progress) * 2f))
 
     Box(
         modifier = Modifier
-            .width(18.dp)
+            .width(10.dp)
             .fillMaxHeight()
-            .padding(vertical = 20.dp)
+            .padding(vertical = 4.dp)
             .background(
                 Brush.horizontalGradient(
                     listOf(
-                        Color.Black.copy(alpha = 0.03f),
+                        Color.Black.copy(alpha = 0.025f),
                         Color.Black.copy(alpha = shadowStrength),
-                        Color.Black.copy(alpha = 0.03f)
+                        Color.Black.copy(alpha = 0.025f)
                     )
                 ),
                 RoundedCornerShape(50)
@@ -697,37 +965,39 @@ private fun BookSpine(progress: Float) {
 
 @Composable
 private fun BookPage(
-    page: DemoPage?,
+    page: ReaderPage?,
     pageNumber: Int,
     isBackSide: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier
-            .shadow(10.dp, RoundedCornerShape(14.dp))
-            .clip(RoundedCornerShape(14.dp)),
+            .shadow(7.dp, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp)),
         color = if (isBackSide) Color(0xFFFFF7E8) else Color(0xFFFFFCF5)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 26.dp, vertical = 30.dp)
+                .padding(horizontal = 28.dp, vertical = 22.dp)
         ) {
-            Text(
-                text = page?.chapter.orEmpty(),
-                fontSize = 20.sp,
-                lineHeight = 26.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Serif,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            if (!page?.chapter.isNullOrBlank()) {
+                Text(
+                    text = page?.chapter.orEmpty(),
+                    fontSize = 19.sp,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Serif,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
 
-            Spacer(Modifier.size(22.dp))
+                Spacer(Modifier.size(16.dp))
+            }
 
             Text(
                 text = page?.body.orEmpty(),
                 fontSize = 18.sp,
-                lineHeight = 30.sp,
+                lineHeight = 29.sp,
                 fontFamily = FontFamily.Serif,
                 color = MaterialTheme.colorScheme.onSurface.copy(
                     alpha = if (isBackSide) 0.88f else 1f
@@ -740,8 +1010,8 @@ private fun BookPage(
                 Text(
                     text = pageNumber.toString(),
                     modifier = Modifier.align(Alignment.CenterHorizontally),
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                 )
             }
         }

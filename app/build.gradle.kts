@@ -12,8 +12,8 @@ android {
         applicationId = "com.foldbook.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     compileOptions {
@@ -34,6 +34,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.window:window:1.3.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
