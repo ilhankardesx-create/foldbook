@@ -37,7 +37,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +60,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -68,6 +68,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
@@ -180,6 +183,8 @@ private fun paginateText(text: String, maxChars: Int = 610): List<String> {
 @Composable
 private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val activity = context as ComponentActivity
     val scope = rememberCoroutineScope()
 
     var library by remember { mutableStateOf<List<LibraryBook>>(emptyList()) }
@@ -192,6 +197,18 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     var readerTitle by remember { mutableStateOf("") }
     var readerKey by remember { mutableStateOf("") }
     var readerPages by remember { mutableStateOf<List<ReaderPage>>(emptyList()) }
+
+    LaunchedEffect(reading) {
+        val controller = WindowCompat.getInsetsController(activity.window, view)
+
+        if (reading) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
 
     fun scanFolder(uri: Uri) {
         scope.launch {
@@ -265,7 +282,6 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
 
     if (reading) {
         ReaderScreen(
-            title = readerTitle,
             pages = readerPages,
             bookKey = readerKey,
             hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
@@ -337,7 +353,7 @@ private fun LibraryScreen(
                 Spacer(Modifier.width(10.dp))
 
                 Text(
-                    text = "v0.4",
+                    text = "v0.5",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
@@ -511,84 +527,46 @@ private fun ShelfBook(
 
 @Composable
 private fun ReaderScreen(
-    title: String,
     pages: List<ReaderPage>,
     bookKey: String,
     hasSeparatingVerticalHinge: Boolean,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val savedPage = remember(bookKey, pages.size) {
+        LibraryStore.readProgress(
+            context = context,
+            bookUri = bookKey,
+            lastPageIndex = pages.lastIndex
+        )
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 24.dp, bottom = 4.dp)
+                .padding(horizontal = 4.dp, vertical = 4.dp)
         ) {
-            ReaderTopBar(
-                title = title,
-                onBack = onBack
-            )
+            val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
 
-            BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
-
-                BookSpread(
-                    pages = pages,
-                    bookKey = bookKey,
-                    twoPage = twoPage,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReaderTopBar(
-    title: String,
-    onBack: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        TextButton(onClick = onBack) {
-            Text(
-                text = "‹ Raf",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+            BookSpread(
+                pages = pages,
+                bookKey = bookKey,
+                initialPageIndex = savedPage,
+                onPageChanged = { pageIndex ->
+                    LibraryStore.saveProgress(
+                        context = context,
+                        bookUri = bookKey,
+                        pageIndex = pageIndex
+                    )
+                },
+                twoPage = twoPage,
+                modifier = Modifier.fillMaxSize()
             )
         }
-
-        Text(
-            text = title,
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 8.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Text(
-            text = "v0.4",
-            modifier = Modifier.padding(end = 10.dp),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary
-        )
     }
 }
 
@@ -596,10 +574,14 @@ private fun ReaderTopBar(
 private fun BookSpread(
     pages: List<ReaderPage>,
     bookKey: String,
+    initialPageIndex: Int,
+    onPageChanged: (Int) -> Unit,
     twoPage: Boolean,
     modifier: Modifier = Modifier
 ) {
-    var pageIndex by rememberSaveable { mutableIntStateOf(0) }
+    var pageIndex by rememberSaveable(bookKey) {
+        mutableIntStateOf(initialPageIndex.coerceIn(0, pages.lastIndex.coerceAtLeast(0)))
+    }
     var dragPx by remember { mutableFloatStateOf(0f) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
     var turnDirection by remember { mutableIntStateOf(0) }
@@ -635,7 +617,11 @@ private fun BookSpread(
             )
 
             if (shouldComplete) {
-                pageIndex += if (direction == 1) step else -step
+                val newIndex = (pageIndex + if (direction == 1) step else -step)
+                    .coerceIn(0, pages.lastIndex.coerceAtLeast(0))
+
+                pageIndex = newIndex
+                onPageChanged(newIndex)
             }
 
             dragPx = 0f
@@ -646,8 +632,8 @@ private fun BookSpread(
         }
     }
 
-    LaunchedEffect(bookKey) {
-        pageIndex = 0
+    LaunchedEffect(bookKey, initialPageIndex) {
+        pageIndex = initialPageIndex.coerceIn(0, pages.lastIndex.coerceAtLeast(0))
         dragPx = 0f
         dragProgress = 0f
         turnDirection = 0
