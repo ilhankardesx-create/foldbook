@@ -327,7 +327,7 @@ private fun LibraryScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Image(
-                    painter = painterResource(R.mipmap.ic_launcher),
+                    painter = painterResource(R.drawable.ic_launcher_foreground),
                     contentDescription = "FoldBook",
                     modifier = Modifier
                         .size(52.dp)
