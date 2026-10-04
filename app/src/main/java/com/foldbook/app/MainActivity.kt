@@ -941,8 +941,11 @@ private fun LibraryScreen(
                 Text(
                     text = "Kütüphane",
                     modifier = Modifier.weight(1f),
-                    fontSize = 25.sp,
+                    fontSize = 22.sp,
+                    fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
@@ -1095,7 +1098,7 @@ private fun LibraryScreen(
                             )
 
                             Text(
-                                text = "v0.9.17",
+                                text = "v0.9.18",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                             )
