@@ -2140,27 +2140,21 @@ private fun TurningPage(
     modifier: Modifier = Modifier
 ) {
     val p = progress.coerceIn(0f, 1f)
-    val y = curlY.coerceIn(0.06f, 0.94f)
     val showingBack = p > 0.5f
     val rotation = if (direction == 1) -180f * p else 180f * p
-    val bend = (1f - abs(0.5f - p) * 2f).coerceIn(0f, 1f)
-    val verticalBias = ((y - 0.5f) * 2f).coerceIn(-1f, 1f)
-    val directionSign = if (direction == 1) 1f else -1f
-    val origin = TransformOrigin(
-        pivotFractionX = if (direction == 1) 0f else 1f,
-        pivotFractionY = y
-    )
+    val origin = if (direction == 1) {
+        TransformOrigin(0f, 0.5f)
+    } else {
+        TransformOrigin(1f, 0.5f)
+    }
 
     Box(
         modifier = modifier.graphicsLayer {
             transformOrigin = origin
             rotationY = rotation
-            rotationX = verticalBias * 9f * bend
-            rotationZ = -verticalBias * directionSign * 5.5f * bend
-            translationY = -verticalBias * size.height * 0.028f * bend
-            cameraDistance = 34f
-            shadowElevation = 22f * bend
-            scaleY = 1f - ((0.012f + 0.012f * abs(verticalBias)) * bend)
+            cameraDistance = 30f
+            shadowElevation = 18f * (1f - abs(0.5f - p) * 2f)
+            scaleY = 1f
         }
     ) {
         Box(
@@ -2188,8 +2182,7 @@ private fun TurningPage(
 
             PageEdgeShadow(
                 direction = direction,
-                progress = p,
-                curlY = y
+                progress = p
             )
         }
     }
@@ -2198,71 +2191,27 @@ private fun TurningPage(
 @Composable
 private fun BoxScope.PageEdgeShadow(
     direction: Int,
-    progress: Float,
-    curlY: Float
+    progress: Float
 ) {
     val strength = (1f - abs(0.5f - progress) * 2f).coerceIn(0f, 1f)
+    val dark = Color.Black.copy(alpha = 0.18f * strength)
     val clear = Color.Transparent
-    val edgeAlignment =
-        if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd
 
     Box(
         modifier = Modifier
             .fillMaxHeight()
-            .width(30.dp)
-            .align(edgeAlignment)
+            .width(26.dp)
+            .align(if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd)
             .background(
                 Brush.horizontalGradient(
                     colors = if (direction == 1) {
-                        listOf(Color.Black.copy(alpha = 0.18f * strength), clear)
+                        listOf(dark, clear)
                     } else {
-                        listOf(clear, Color.Black.copy(alpha = 0.18f * strength))
+                        listOf(clear, dark)
                     }
                 )
             )
     )
-
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxHeight()
-            .width(46.dp)
-            .align(edgeAlignment)
-    ) {
-        val bandHeight = 112.dp
-        val travel = (maxHeight - bandHeight).coerceAtLeast(0.dp)
-        val bandOffset = travel * curlY.coerceIn(0f, 1f)
-        val localDark = Color.Black.copy(alpha = 0.16f * strength)
-
-        Box(
-            modifier = Modifier
-                .offset(y = bandOffset)
-                .fillMaxWidth()
-                .height(bandHeight)
-                .background(
-                    Brush.horizontalGradient(
-                        colors = if (direction == 1) {
-                            listOf(localDark, clear)
-                        } else {
-                            listOf(clear, localDark)
-                        }
-                    )
-                )
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                clear,
-                                Color.Black.copy(alpha = 0.10f * strength),
-                                clear
-                            )
-                        )
-                    )
-            )
-        }
-    }
 }
 
 @Composable
