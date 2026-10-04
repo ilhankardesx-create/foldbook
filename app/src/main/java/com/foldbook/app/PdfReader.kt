@@ -17,8 +17,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -318,11 +320,6 @@ fun PdfReaderScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(3.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures {
-                        controlsVisible = !controlsVisible
-                    }
-                }
         ) {
             val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
 
@@ -338,6 +335,9 @@ fun PdfReaderScreen(
                         bookUri = bookKey,
                         pageIndex = page
                     )
+                },
+                onSingleTap = {
+                    controlsVisible = !controlsVisible
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -391,6 +391,7 @@ private fun PdfSpread(
     twoPage: Boolean,
     theme: ReaderThemeOption,
     onPageChanged: (Int) -> Unit,
+    onSingleTap: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var pageIndex by rememberSaveable(bookKey) {
@@ -541,6 +542,41 @@ private fun PdfSpread(
                 onDragEnd = { settleTurn() },
                 onDragCancel = { settleTurn(cancelOnly = true) }
             )
+        }
+        .pointerInput(bookKey, pageIndex, twoPage) {
+            awaitEachGesture {
+                val down = awaitFirstDown(pass = PointerEventPass.Initial)
+                val startPosition = down.position
+                val startTime = down.uptimeMillis
+                var moved = false
+
+                while (true) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id }
+                        ?: break
+
+                    val dx = change.position.x - startPosition.x
+                    val dy = change.position.y - startPosition.y
+
+                    if (
+                        kotlin.math.abs(dx) > viewConfiguration.touchSlop ||
+                        kotlin.math.abs(dy) > viewConfiguration.touchSlop
+                    ) {
+                        moved = true
+                    }
+
+                    if (!change.pressed) {
+                        val duration = change.uptimeMillis - startTime
+                        if (
+                            !moved &&
+                            duration < viewConfiguration.longPressTimeoutMillis
+                        ) {
+                            onSingleTap()
+                        }
+                        break
+                    }
+                }
+            }
         }
 
     Box(
