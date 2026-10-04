@@ -217,8 +217,13 @@ private fun EpubBook.toReaderPages(
         pageWidthPx - (56f * density)
     ).toInt().coerceAtLeast(120)
 
+    val bottomSafetyPx = (bodyLineHeightPx * 1.25f).toInt()
+
     val contentHeightPx = (
-        pageHeightPx - (44f * density) - (30f * density)
+        pageHeightPx -
+            (44f * density) -      // üst + alt sayfa iç boşluğu
+            (30f * density) -      // sayfa numarası alanı
+            bottomSafetyPx         // yarım satır görünmesini engelleyen güvenli alan
     ).toInt().coerceAtLeast((bodyLineHeightPx * 4f).toInt())
 
     return buildList {
@@ -633,7 +638,7 @@ private fun LibraryScreen(
                     Spacer(Modifier.height(4.dp))
 
                     Text(
-                        text = "v0.9.4",
+                        text = "v0.9.5",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
