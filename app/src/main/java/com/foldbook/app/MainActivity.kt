@@ -100,6 +100,7 @@ import androidx.window.layout.WindowLayoutInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.math.abs
 
@@ -164,6 +165,7 @@ private val LocalReaderPalette = staticCompositionLocalOf {
 }
 
 private val LocalReaderFontSize = staticCompositionLocalOf { ReaderFontSize.MEDIUM }
+private val LocalReaderPageCount = staticCompositionLocalOf { 0 }
 
 private fun fontSizeSp(size: ReaderFontSize): Float = when (size) {
     ReaderFontSize.SMALL -> 16f
@@ -218,10 +220,12 @@ private fun EpubBook.toReaderPages(
 
     // BookPage iç boşlukları + alttaki sayfa numarası için ayrılan alan.
     val contentWidthPx = (
-        pageWidthPx - (56f * density)
+        pageWidthPx - (64f * density)
     ).toInt().coerceAtLeast(120)
 
-    val bottomSafetyPx = (bodyLineHeightPx * 1.25f).toInt()
+    // Compose ile StaticLayout arasındaki küçük font ölçüm farklarında
+    // son satırın kesilmemesi için yaklaşık iki satırlık güvenli alan.
+    val bottomSafetyPx = (bodyLineHeightPx * 1.85f).toInt()
 
     val contentHeightPx = (
         pageHeightPx -
@@ -380,7 +384,6 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     fun openBook(book: LibraryBook) {
         LibraryStore.saveLastOpened(context, book.uri)
         LibraryStore.saveActiveBook(context, book)
-        library = listOf(book) + library.filterNot { it.uri == book.uri }
 
         scope.launch {
             readerLoading = true
@@ -417,6 +420,67 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
         }
     }
 
+    fun toggleFavorite(book: LibraryBook) {
+        val favorite = LibraryStore.toggleFavorite(context, book)
+        library = library.map { current ->
+            if (current.uri == book.uri) {
+                current.copy(isFavorite = favorite)
+            } else {
+                current
+            }
+        }
+    }
+
+    fun renameBook(book: LibraryBook, newTitle: String) {
+        val folder = LibraryStore.savedFolder(context)
+
+        scope.launch {
+            libraryLoading = true
+            libraryError = null
+
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    LibraryStore.renameBook(context, book, newTitle)
+                    folder?.let { LibraryStore.scanFolder(context, it) }
+                }
+            }.onSuccess { refreshed ->
+                if (refreshed != null) {
+                    library = refreshed
+                }
+            }.onFailure {
+                libraryError = it.message ?: "Kitap yeniden adlandırılamadı."
+            }
+
+            libraryLoading = false
+        }
+    }
+
+    fun deleteBook(book: LibraryBook) {
+        val folder = LibraryStore.savedFolder(context)
+
+        scope.launch {
+            libraryLoading = true
+            libraryError = null
+
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    LibraryStore.deleteBook(context, book)
+                    folder?.let { LibraryStore.scanFolder(context, it) }
+                }
+            }.onSuccess { refreshed ->
+                if (refreshed != null) {
+                    library = refreshed
+                } else {
+                    library = library.filterNot { it.uri == book.uri }
+                }
+            }.onFailure {
+                libraryError = it.message ?: "Kitap silinemedi."
+            }
+
+            libraryLoading = false
+        }
+    }
+
     val folderPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -424,7 +488,8 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
             }
             LibraryStore.saveFolder(context, uri)
@@ -477,7 +542,10 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             onRefresh = {
                 LibraryStore.savedFolder(context)?.let { scanFolder(it) }
             },
-            onBookClick = ::openBook
+            onBookClick = ::openBook,
+            onToggleFavorite = ::toggleFavorite,
+            onRenameBook = ::renameBook,
+            onDeleteBook = ::deleteBook
         )
     }
 }
@@ -489,7 +557,10 @@ private fun LibraryScreen(
     error: String?,
     onChooseFolder: () -> Unit,
     onRefresh: () -> Unit,
-    onBookClick: (LibraryBook) -> Unit
+    onBookClick: (LibraryBook) -> Unit,
+    onToggleFavorite: (LibraryBook) -> Unit,
+    onRenameBook: (LibraryBook, String) -> Unit,
+    onDeleteBook: (LibraryBook) -> Unit
 ) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
@@ -503,6 +574,10 @@ private fun LibraryScreen(
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
     var supportVisible by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var actionBook by remember { mutableStateOf<LibraryBook?>(null) }
+    var renameBookTarget by remember { mutableStateOf<LibraryBook?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleteBookTarget by remember { mutableStateOf<LibraryBook?>(null) }
 
     DisposableEffect(supportBilling) {
         supportBilling.start()
@@ -527,6 +602,140 @@ private fun LibraryScreen(
                 book.title.contains(query, ignoreCase = true)
             }
         }
+    }
+
+    actionBook?.let { book ->
+        AlertDialog(
+            onDismissRequest = { actionBook = null },
+            title = {
+                Text(
+                    text = book.title,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            onToggleFavorite(book)
+                            actionBook = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (book.isFavorite) {
+                                "♥ Favorilerden Çıkar"
+                            } else {
+                                "♥ Favorilere Ekle"
+                            }
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            renameBookTarget = book
+                            renameText = book.title
+                            actionBook = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Yeniden Adlandır")
+                    }
+
+                    Button(
+                        onClick = {
+                            deleteBookTarget = book
+                            actionBook = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Kitabı Sil")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { actionBook = null }) {
+                    Text("Kapat")
+                }
+            }
+        )
+    }
+
+    renameBookTarget?.let { book ->
+        AlertDialog(
+            onDismissRequest = { renameBookTarget = null },
+            title = {
+                Text(
+                    text = "Yeniden Adlandır",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Kitap adı") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val title = renameText.trim()
+                        if (title.isNotBlank()) {
+                            onRenameBook(book, title)
+                            renameBookTarget = null
+                        }
+                    }
+                ) {
+                    Text("Kaydet")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameBookTarget = null }) {
+                    Text("İptal")
+                }
+            }
+        )
+    }
+
+    deleteBookTarget?.let { book ->
+        AlertDialog(
+            onDismissRequest = { deleteBookTarget = null },
+            title = {
+                Text(
+                    text = "Kitap silinsin mi?",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "“${book.title}” cihazındaki kitap klasöründen silinecek."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteBook(book)
+                        deleteBookTarget = null
+                    }
+                ) {
+                    Text(
+                        text = "Sil",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteBookTarget = null }) {
+                    Text("Vazgeç")
+                }
+            }
+        )
     }
 
     if (supportVisible) {
@@ -740,7 +949,7 @@ private fun LibraryScreen(
                         )
 
                         Text(
-                            text = "v0.9.7",
+                            text = "v0.9.8",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                         )
@@ -799,7 +1008,8 @@ private fun LibraryScreen(
                         ) { book ->
                             ShelfBook(
                                 book = book,
-                                onClick = { onBookClick(book) }
+                                onClick = { onBookClick(book) },
+                                onLongPress = { actionBook = book }
                             )
                         }
                     }
@@ -855,7 +1065,8 @@ private fun EmptyLibrary(
 @Composable
 private fun ShelfBook(
     book: LibraryBook,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongPress: () -> Unit
 ) {
     val context = LocalContext.current
     val coverBitmap by produceState<Bitmap?>(
@@ -884,11 +1095,26 @@ private fun ShelfBook(
     val coverColor = covers[(book.title.hashCode() and Int.MAX_VALUE) % covers.size]
 
     Surface(
-        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(0.67f)
-            .shadow(6.dp, RoundedCornerShape(5.dp)),
+            .shadow(6.dp, RoundedCornerShape(5.dp))
+            .pointerInput(book.uri) {
+                detectTapGestures(
+                    onPress = {
+                        val released = withTimeoutOrNull(2_000L) {
+                            tryAwaitRelease()
+                        }
+
+                        if (released == null) {
+                            onLongPress()
+                            tryAwaitRelease()
+                        } else if (released) {
+                            onClick()
+                        }
+                    }
+                )
+            },
         shape = RoundedCornerShape(5.dp),
         color = coverColor
     ) {
@@ -929,6 +1155,24 @@ private fun ShelfBook(
                         fontSize = 13.sp,
                         lineHeight = 16.sp,
                         color = Color(0xFFFFF8EA)
+                    )
+                }
+            }
+
+            if (book.isFavorite) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp),
+                    shape = RoundedCornerShape(50),
+                    color = Color.White.copy(alpha = 0.86f)
+                ) {
+                    Text(
+                        text = "♥",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = Color(0xFFD32F2F),
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -1549,20 +1793,24 @@ private fun BookSpread(
         modifier = modifier.then(gestureModifier),
         contentAlignment = Alignment.Center
     ) {
-        if (twoPage) {
-            TwoPageSpread(
-                pages = pages,
-                pageIndex = pageIndex,
-                turnDirection = turnDirection,
-                progress = progress
-            )
-        } else {
-            SinglePageSpread(
-                pages = pages,
-                pageIndex = pageIndex,
-                turnDirection = turnDirection,
-                progress = progress
-            )
+        CompositionLocalProvider(
+            LocalReaderPageCount provides pages.size
+        ) {
+            if (twoPage) {
+                TwoPageSpread(
+                    pages = pages,
+                    pageIndex = pageIndex,
+                    turnDirection = turnDirection,
+                    progress = progress
+                )
+            } else {
+                SinglePageSpread(
+                    pages = pages,
+                    pageIndex = pageIndex,
+                    turnDirection = turnDirection,
+                    progress = progress
+                )
+            }
         }
     }
 }
@@ -1811,6 +2059,7 @@ private fun BookPage(
 ) {
     val palette = LocalReaderPalette.current
     val readerFontSize = LocalReaderFontSize.current
+    val totalPages = LocalReaderPageCount.current
     val bodySize = fontSizeSp(readerFontSize)
 
     Surface(
@@ -1851,7 +2100,11 @@ private fun BookPage(
 
             if (page != null && pageNumber > 0) {
                 Text(
-                    text = pageNumber.toString(),
+                    text = if (totalPages > 0) {
+                        "$pageNumber / $totalPages"
+                    } else {
+                        pageNumber.toString()
+                    },
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                     fontSize = 12.sp,
                     color = palette.text.copy(alpha = 0.50f)
