@@ -27,7 +27,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1775,8 +1776,10 @@ private fun BookSpread(
     }
     var dragPx by remember { mutableFloatStateOf(0f) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
+    var dragYFraction by remember { mutableFloatStateOf(0.5f) }
     var turnDirection by remember { mutableIntStateOf(0) }
     var pageWidthPx by remember { mutableFloatStateOf(1f) }
+    var pageHeightPx by remember { mutableFloatStateOf(1f) }
     var settling by remember { mutableStateOf(false) }
 
     val settleAnimation = remember { Animatable(0f) }
@@ -1817,6 +1820,7 @@ private fun BookSpread(
 
             dragPx = 0f
             dragProgress = 0f
+            dragYFraction = 0.5f
             turnDirection = 0
             settleAnimation.snapTo(0f)
             settling = false
@@ -1827,6 +1831,7 @@ private fun BookSpread(
         pageIndex = initialPageIndex.coerceIn(0, pages.lastIndex.coerceAtLeast(0))
         dragPx = 0f
         dragProgress = 0f
+        dragYFraction = 0.5f
         turnDirection = 0
     }
 
@@ -1837,6 +1842,7 @@ private fun BookSpread(
 
         dragPx = 0f
         dragProgress = 0f
+        dragYFraction = 0.5f
         turnDirection = 0
     }
 
@@ -1850,6 +1856,7 @@ private fun BookSpread(
             turnDirection = 1
             dragPx = -pageWidthPx
             dragProgress = 0f
+            dragYFraction = 0.68f
 
             settleAnimation.snapTo(0f)
             settleAnimation.animateTo(
@@ -1868,6 +1875,7 @@ private fun BookSpread(
 
             dragPx = 0f
             dragProgress = 0f
+            dragYFraction = 0.5f
             turnDirection = 0
             settleAnimation.snapTo(0f)
             settling = false
@@ -1877,20 +1885,25 @@ private fun BookSpread(
     val gestureModifier = Modifier
         .onSizeChanged {
             pageWidthPx = if (twoPage) it.width / 2f else it.width.toFloat()
+            pageHeightPx = it.height.toFloat().coerceAtLeast(1f)
         }
-        .pointerInput(pageIndex, twoPage, pageWidthPx, settling) {
+        .pointerInput(pageIndex, twoPage, pageWidthPx, pageHeightPx, settling) {
             if (settling) return@pointerInput
 
-            detectHorizontalDragGestures(
-                onDragStart = {
+            detectDragGestures(
+                onDragStart = { startOffset ->
                     dragPx = 0f
                     dragProgress = 0f
+                    dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)
                     turnDirection = 0
                 },
-                onHorizontalDrag = { change, dragAmount ->
+                onDrag = { change, dragAmount ->
                     change.consume()
 
-                    val proposed = (dragPx + dragAmount)
+                    dragYFraction = (change.position.y / pageHeightPx)
+                        .coerceIn(0.06f, 0.94f)
+
+                    val proposed = (dragPx + dragAmount.x)
                         .coerceIn(-pageWidthPx, pageWidthPx)
 
                     val direction = when {
@@ -1965,14 +1978,16 @@ private fun BookSpread(
                     pages = pages,
                     pageIndex = pageIndex,
                     turnDirection = turnDirection,
-                    progress = progress
+                    progress = progress,
+                    curlY = dragYFraction
                 )
             } else {
                 SinglePageSpread(
                     pages = pages,
                     pageIndex = pageIndex,
                     turnDirection = turnDirection,
-                    progress = progress
+                    progress = progress,
+                    curlY = dragYFraction
                 )
             }
         }
@@ -1984,7 +1999,8 @@ private fun TwoPageSpread(
     pages: List<ReaderPage>,
     pageIndex: Int,
     turnDirection: Int,
-    progress: Float
+    progress: Float,
+    curlY: Float
 ) {
     val isForward = turnDirection == 1
     val isBackward = turnDirection == -1
@@ -1999,6 +2015,7 @@ private fun TwoPageSpread(
                 .weight(1f)
                 .fillMaxSize()
                 .padding(vertical = 4.dp)
+                .zIndex(if (isBackward) 3f else 0f)
         ) {
             val leftPage = if (isBackward) {
                 pages.getOrNull(pageIndex - 2)
@@ -2021,6 +2038,7 @@ private fun TwoPageSpread(
                     backNumber = pageIndex,
                     progress = progress,
                     direction = -1,
+                    curlY = curlY,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -2035,6 +2053,7 @@ private fun TwoPageSpread(
                 .weight(1f)
                 .fillMaxSize()
                 .padding(vertical = 4.dp)
+                .zIndex(if (isForward) 3f else 0f)
         ) {
             val rightPage = if (isForward) {
                 pages.getOrNull(pageIndex + 3)
@@ -2057,6 +2076,7 @@ private fun TwoPageSpread(
                     backNumber = pageIndex + 3,
                     progress = progress,
                     direction = 1,
+                    curlY = curlY,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -2071,7 +2091,8 @@ private fun SinglePageSpread(
     pages: List<ReaderPage>,
     pageIndex: Int,
     turnDirection: Int,
-    progress: Float
+    progress: Float,
+    curlY: Float
 ) {
     val targetIndex = when (turnDirection) {
         1 -> pageIndex + 1
@@ -2098,6 +2119,7 @@ private fun SinglePageSpread(
                 backNumber = 0,
                 progress = progress,
                 direction = turnDirection,
+                curlY = curlY,
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(4f)
@@ -2114,24 +2136,31 @@ private fun TurningPage(
     backNumber: Int,
     progress: Float,
     direction: Int,
+    curlY: Float,
     modifier: Modifier = Modifier
 ) {
     val p = progress.coerceIn(0f, 1f)
+    val y = curlY.coerceIn(0.06f, 0.94f)
     val showingBack = p > 0.5f
     val rotation = if (direction == 1) -180f * p else 180f * p
-    val origin = if (direction == 1) {
-        TransformOrigin(0f, 0.5f)
-    } else {
-        TransformOrigin(1f, 0.5f)
-    }
+    val bend = (1f - abs(0.5f - p) * 2f).coerceIn(0f, 1f)
+    val verticalBias = ((y - 0.5f) * 2f).coerceIn(-1f, 1f)
+    val directionSign = if (direction == 1) 1f else -1f
+    val origin = TransformOrigin(
+        pivotFractionX = if (direction == 1) 0f else 1f,
+        pivotFractionY = y
+    )
 
     Box(
         modifier = modifier.graphicsLayer {
             transformOrigin = origin
             rotationY = rotation
-            cameraDistance = 30f
-            shadowElevation = 18f * (1f - abs(0.5f - p) * 2f)
-            scaleY = 1f - (0.012f * (1f - abs(0.5f - p) * 2f))
+            rotationX = verticalBias * 9f * bend
+            rotationZ = -verticalBias * directionSign * 5.5f * bend
+            translationY = -verticalBias * size.height * 0.028f * bend
+            cameraDistance = 34f
+            shadowElevation = 22f * bend
+            scaleY = 1f - ((0.012f + 0.012f * abs(verticalBias)) * bend)
         }
     ) {
         Box(
@@ -2159,7 +2188,8 @@ private fun TurningPage(
 
             PageEdgeShadow(
                 direction = direction,
-                progress = p
+                progress = p,
+                curlY = y
             )
         }
     }
@@ -2168,27 +2198,71 @@ private fun TurningPage(
 @Composable
 private fun BoxScope.PageEdgeShadow(
     direction: Int,
-    progress: Float
+    progress: Float,
+    curlY: Float
 ) {
     val strength = (1f - abs(0.5f - progress) * 2f).coerceIn(0f, 1f)
-    val dark = Color.Black.copy(alpha = 0.18f * strength)
     val clear = Color.Transparent
+    val edgeAlignment =
+        if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd
 
     Box(
         modifier = Modifier
             .fillMaxHeight()
-            .width(26.dp)
-            .align(if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd)
+            .width(30.dp)
+            .align(edgeAlignment)
             .background(
                 Brush.horizontalGradient(
                     colors = if (direction == 1) {
-                        listOf(dark, clear)
+                        listOf(Color.Black.copy(alpha = 0.18f * strength), clear)
                     } else {
-                        listOf(clear, dark)
+                        listOf(clear, Color.Black.copy(alpha = 0.18f * strength))
                     }
                 )
             )
     )
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(46.dp)
+            .align(edgeAlignment)
+    ) {
+        val bandHeight = 112.dp
+        val travel = (maxHeight - bandHeight).coerceAtLeast(0.dp)
+        val bandOffset = travel * curlY.coerceIn(0f, 1f)
+        val localDark = Color.Black.copy(alpha = 0.16f * strength)
+
+        Box(
+            modifier = Modifier
+                .offset(y = bandOffset)
+                .fillMaxWidth()
+                .height(bandHeight)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = if (direction == 1) {
+                            listOf(localDark, clear)
+                        } else {
+                            listOf(clear, localDark)
+                        }
+                    )
+                )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                clear,
+                                Color.Black.copy(alpha = 0.10f * strength),
+                                clear
+                            )
+                        )
+                    )
+            )
+        }
+    }
 }
 
 @Composable
