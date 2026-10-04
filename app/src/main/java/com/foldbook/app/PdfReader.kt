@@ -401,6 +401,7 @@ private fun PdfSpread(
             PdfPage(
                 document = document,
                 index = pageIndex,
+                theme = theme,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
