@@ -38,13 +38,16 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -409,12 +412,95 @@ private fun LibraryScreen(
     onBookClick: (LibraryBook) -> Unit
 ) {
     val context = LocalContext.current
+    val activity = context as ComponentActivity
+    val supportBilling = remember(activity) {
+        SupportBillingManager(activity)
+    }
+    val supportProducts by supportBilling.products.collectAsState()
+    val billingReady by supportBilling.ready.collectAsState()
+    val billingMessage by supportBilling.message.collectAsState()
+
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
+    var supportVisible by rememberSaveable { mutableStateOf(false) }
+
+    DisposableEffect(supportBilling) {
+        supportBilling.start()
+        onDispose {
+            supportBilling.close()
+        }
+    }
+
     var selectedTheme by remember {
         mutableStateOf(LibraryStore.readReaderTheme(context))
     }
     var selectedFontSize by remember {
         mutableStateOf(LibraryStore.readReaderFontSize(context))
+    }
+
+    if (supportVisible) {
+        AlertDialog(
+            onDismissRequest = {
+                supportVisible = false
+                supportBilling.clearMessage()
+            },
+            title = {
+                Text(
+                    text = "FoldBook'a Destek Ol ❤️",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "FoldBook'u sevdiysen küçük bir destek bırakabilirsin. Tamamen isteğe bağlıdır.",
+                        fontSize = 14.sp
+                    )
+
+                    supportProducts.forEach { product ->
+                        Button(
+                            onClick = {
+                                supportBilling.clearMessage()
+                                supportBilling.purchase(product.productId)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "${product.emoji} ${product.title}  •  ${product.priceLabel}"
+                            )
+                        }
+                    }
+
+                    if (!billingReady) {
+                        Text(
+                            text = "Google Play ödeme servisine bağlanıyor…",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                        )
+                    }
+
+                    billingMessage?.let { message ->
+                        Text(
+                            text = message,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        supportVisible = false
+                        supportBilling.clearMessage()
+                    }
+                ) {
+                    Text("Kapat")
+                }
+            }
+        )
     }
 
     Surface(
@@ -461,12 +547,27 @@ private fun LibraryScreen(
                     )
                 }
 
-                Text(
-                    text = "v0.9.2",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Column(
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Button(
+                        onClick = {
+                            supportBilling.clearMessage()
+                            supportVisible = true
+                        }
+                    ) {
+                        Text("☕ Destek")
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Text(
+                        text = "v0.9.3",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
             Row(
