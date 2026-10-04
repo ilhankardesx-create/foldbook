@@ -12,8 +12,8 @@ android {
         applicationId = "com.foldbook.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "0.9.8"
+        versionCode = 20
+        versionName = "0.9.9"
     }
 
     compileOptions {
