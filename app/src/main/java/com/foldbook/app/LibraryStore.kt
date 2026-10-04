@@ -4,9 +4,12 @@ import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 
+enum class BookFormat { EPUB, PDF }
+
 data class LibraryBook(
     val title: String,
-    val uri: String
+    val uri: String,
+    val format: BookFormat
 )
 
 object LibraryStore {
@@ -64,22 +67,28 @@ object LibraryStore {
         }
 
         val result = mutableListOf<LibraryBook>()
-        collectEpubs(root, result)
+        collectBooks(root, result)
 
         return result
             .distinctBy { it.uri }
             .sortedBy { it.title.lowercase() }
     }
 
-    private fun collectEpubs(
+    private fun collectBooks(
         directory: DocumentFile,
         output: MutableList<LibraryBook>
     ) {
         for (file in directory.listFiles()) {
             when {
-                file.isDirectory -> collectEpubs(file, output)
-                file.isFile && file.name?.endsWith(".epub", ignoreCase = true) == true -> {
+                file.isDirectory -> collectBooks(file, output)
+                file.isFile -> {
                     val displayName = file.name.orEmpty()
+                    val format = when {
+                        displayName.endsWith(".epub", ignoreCase = true) -> BookFormat.EPUB
+                        displayName.endsWith(".pdf", ignoreCase = true) -> BookFormat.PDF
+                        else -> null
+                    } ?: continue
+
                     val title = displayName
                         .substringBeforeLast(".")
                         .replace('_', ' ')
@@ -89,7 +98,8 @@ object LibraryStore {
 
                     output += LibraryBook(
                         title = title,
-                        uri = file.uri.toString()
+                        uri = file.uri.toString(),
+                        format = format
                     )
                 }
             }
