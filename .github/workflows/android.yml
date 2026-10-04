@@ -1,5 +1,5 @@
 name: Android APK
-# FoldBook 0.9.22 PDF gesture build
+# FoldBook 0.9.23 PDF atomic handoff build
 
 on:
   workflow_dispatch:
