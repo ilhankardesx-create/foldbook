@@ -25,6 +25,8 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
@@ -82,6 +84,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -968,9 +971,17 @@ private fun LibraryScreen(
                         ) {
                             Button(
                                 onClick = onChooseFolder,
-                                enabled = !isLoading
+                                enabled = !isLoading,
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Text(if (isLoading) "Taranıyor…" else "Klasör Seç")
+                                Text(
+                                    if (isLoading) {
+                                        "Taranıyor…"
+                                    } else {
+                                        "Kitapların Olduğu Klasörü Seç"
+                                    },
+                                    textAlign = TextAlign.Center
+                                )
                             }
 
                             Button(
@@ -1042,7 +1053,7 @@ private fun LibraryScreen(
                         )
 
                         Text(
-                            text = "v0.9.9",
+                            text = "v0.9.10",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                         )
@@ -1149,7 +1160,7 @@ private fun EmptyLibrary(
             Spacer(Modifier.height(22.dp))
 
             Button(onClick = onChooseFolder) {
-                Text("Kitap Klasörü Seç")
+                Text("Kitapların Olduğu Klasörü Seç")
             }
         }
     }
@@ -1379,11 +1390,6 @@ private fun ReaderScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 4.dp, vertical = 4.dp)
-                    .pointerInput(bookKey) {
-                        detectTapGestures {
-                            controlsVisible = !controlsVisible
-                        }
-                    }
             ) {
                 val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
 
@@ -1582,6 +1588,9 @@ private fun ReaderScreen(
                             },
                             twoPage = twoPage,
                             autoForwardToken = autoForwardToken,
+                            onSingleTap = {
+                                controlsVisible = !controlsVisible
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -1741,6 +1750,7 @@ private fun BookSpread(
     onPageChanged: (Int) -> Unit,
     twoPage: Boolean,
     autoForwardToken: Int = 0,
+    onSingleTap: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var pageIndex by rememberSaveable(bookKey) {
@@ -1888,6 +1898,42 @@ private fun BookSpread(
                 onDragEnd = { settleTurn() },
                 onDragCancel = { settleTurn(cancelOnly = true) }
             )
+        }
+        .pointerInput(bookKey, pageIndex, twoPage) {
+            awaitEachGesture {
+                val down = awaitFirstDown(pass = PointerEventPass.Initial)
+                val startPosition = down.position
+                val startTime = down.uptimeMillis
+                var moved = false
+
+                while (true) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id }
+                        ?: break
+
+                    val dx = change.position.x - startPosition.x
+                    val dy = change.position.y - startPosition.y
+
+                    if (
+                        kotlin.math.abs(dx) > viewConfiguration.touchSlop ||
+                        kotlin.math.abs(dy) > viewConfiguration.touchSlop
+                    ) {
+                        moved = true
+                    }
+
+                    if (!change.pressed) {
+                        val duration = change.uptimeMillis - startTime
+
+                        if (
+                            !moved &&
+                            duration < viewConfiguration.longPressTimeoutMillis
+                        ) {
+                            onSingleTap()
+                        }
+                        break
+                    }
+                }
+            }
         }
 
     Box(
