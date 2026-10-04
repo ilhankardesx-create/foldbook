@@ -6,6 +6,7 @@ import androidx.documentfile.provider.DocumentFile
 
 enum class BookFormat { EPUB, PDF }
 enum class ReaderThemeOption { LIGHT, SEPIA, DARK }
+enum class ReaderFontSize { SMALL, MEDIUM, LARGE }
 
 data class LibraryBook(
     val title: String,
@@ -19,6 +20,7 @@ object LibraryStore {
     private const val KEY_PROGRESS_PREFIX = "reading_progress_"
     private const val KEY_READER_THEME = "reader_theme"
     private const val KEY_LAST_OPENED_URI = "last_opened_uri"
+    private const val KEY_READER_FONT_SIZE = "reader_font_size"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -60,6 +62,21 @@ object LibraryStore {
 
         return runCatching { ReaderThemeOption.valueOf(value.orEmpty()) }
             .getOrDefault(ReaderThemeOption.LIGHT)
+    }
+
+    fun saveReaderFontSize(context: Context, size: ReaderFontSize) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_READER_FONT_SIZE, size.name)
+            .apply()
+    }
+
+    fun readReaderFontSize(context: Context): ReaderFontSize {
+        val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_READER_FONT_SIZE, ReaderFontSize.MEDIUM.name)
+
+        return runCatching { ReaderFontSize.valueOf(value.orEmpty()) }
+            .getOrDefault(ReaderFontSize.MEDIUM)
     }
 
     fun saveProgress(
