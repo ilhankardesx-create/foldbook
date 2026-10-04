@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -501,6 +502,7 @@ private fun LibraryScreen(
 
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
     var supportVisible by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
 
     DisposableEffect(supportBilling) {
         supportBilling.start()
@@ -514,6 +516,17 @@ private fun LibraryScreen(
     }
     var selectedFontSize by remember {
         mutableStateOf(LibraryStore.readReaderFontSize(context))
+    }
+
+    val filteredBooks = remember(books, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isBlank()) {
+            books
+        } else {
+            books.filter { book ->
+                book.title.contains(query, ignoreCase = true)
+            }
+        }
     }
 
     if (supportVisible) {
@@ -594,100 +607,78 @@ private fun LibraryScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Image(
-                    painter = painterResource(R.drawable.ic_launcher_foreground),
-                    contentDescription = "FoldBook",
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(13.dp))
+                Text(
+                    text = "Kütüphane",
+                    modifier = Modifier.weight(1f),
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-
-                Spacer(Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "FoldBook",
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    Text(
-                        text = if (books.isEmpty()) {
-                            "Kütüphanen"
-                        } else {
-                            "${books.size} kitap rafında"
-                        },
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
-                    )
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.End
-                ) {
-                    Button(
-                        onClick = {
-                            supportBilling.clearMessage()
-                            supportVisible = true
-                        }
-                    ) {
-                        Text("☕ Destek")
-                    }
-
-                    Spacer(Modifier.height(4.dp))
-
-                    Text(
-                        text = "v0.9.6",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 22.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = onChooseFolder,
-                    enabled = !isLoading
-                ) {
-                    Text(if (isLoading) "Taranıyor…" else "Klasör Seç")
-                }
-
-                Button(
-                    onClick = onRefresh,
-                    enabled = !isLoading
-                ) {
-                    Text("Yenile")
-                }
 
                 Button(
                     onClick = { settingsVisible = !settingsVisible }
                 ) {
-                    Text("Okuma Ayarları")
+                    Text("Ayarlar")
+                }
+
+                Spacer(Modifier.width(6.dp))
+
+                Button(
+                    onClick = {
+                        supportBilling.clearMessage()
+                        supportVisible = true
+                    }
+                ) {
+                    Text("Destek")
                 }
             }
+
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                placeholder = {
+                    Text("🔍  Kitap ara")
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(22.dp)
+            )
 
             AnimatedVisibility(visible = settingsVisible) {
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 22.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surface
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onChooseFolder,
+                                enabled = !isLoading
+                            ) {
+                                Text(if (isLoading) "Taranıyor…" else "Klasör Seç")
+                            }
+
+                            Button(
+                                onClick = onRefresh,
+                                enabled = !isLoading
+                            ) {
+                                Text("Yenile")
+                            }
+                        }
+
                         Text(
                             text = "Tema",
                             fontWeight = FontWeight.Bold,
@@ -747,6 +738,12 @@ private fun LibraryScreen(
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
                         )
+
+                        Text(
+                            text = "v0.9.7",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
+                        )
                     }
                 }
             }
@@ -754,40 +751,57 @@ private fun LibraryScreen(
             error?.let {
                 Text(
                     text = it,
-                    modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     color = MaterialTheme.colorScheme.error,
                     fontSize = 13.sp
                 )
             }
 
-            if (books.isEmpty() && !isLoading) {
-                EmptyLibrary(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    onChooseFolder = onChooseFolder
-                )
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 145.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 18.dp,
-                        end = 18.dp,
-                        top = 10.dp,
-                        bottom = 32.dp
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    items(
-                        items = books,
-                        key = { it.uri }
-                    ) { book ->
-                        ShelfBook(
-                            book = book,
-                            onClick = { onBookClick(book) }
+            when {
+                books.isEmpty() && !isLoading -> {
+                    EmptyLibrary(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        onChooseFolder = onChooseFolder
+                    )
+                }
+
+                filteredBooks.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Bu isimde kitap bulunamadı.",
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
                         )
+                    }
+                }
+
+                else -> {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 102.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            start = 12.dp,
+                            end = 12.dp,
+                            top = 10.dp,
+                            bottom = 28.dp
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(
+                            items = filteredBooks,
+                            key = { it.uri }
+                        ) { book ->
+                            ShelfBook(
+                                book = book,
+                                onClick = { onBookClick(book) }
+                            )
+                        }
                     }
                 }
             }
@@ -869,87 +883,56 @@ private fun ShelfBook(
     )
     val coverColor = covers[(book.title.hashCode() and Int.MAX_VALUE) % covers.size]
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.67f)
+            .shadow(6.dp, RoundedCornerShape(5.dp)),
+        shape = RoundedCornerShape(5.dp),
+        color = coverColor
     ) {
-        Surface(
-            onClick = onClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.68f)
-                .shadow(9.dp, RoundedCornerShape(8.dp)),
-            shape = RoundedCornerShape(8.dp),
-            color = coverColor
+        Box(
+            modifier = Modifier.fillMaxSize()
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                if (coverBitmap != null) {
-                    Image(
-                        bitmap = coverBitmap!!.asImageBitmap(),
-                        contentDescription = book.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
+            if (coverBitmap != null) {
+                Image(
+                    bitmap = coverBitmap!!.asImageBitmap(),
+                    contentDescription = book.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(9.dp)
+                ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(14.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .width(5.dp)
-                                .align(Alignment.CenterStart)
-                                .background(Color.Black.copy(alpha = 0.13f))
-                        )
+                            .fillMaxHeight()
+                            .width(4.dp)
+                            .align(Alignment.CenterStart)
+                            .background(Color.Black.copy(alpha = 0.13f))
+                    )
 
-                        Text(
-                            text = book.title,
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(horizontal = 8.dp),
-                            textAlign = TextAlign.Center,
-                            maxLines = 6,
-                            overflow = TextOverflow.Ellipsis,
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp,
-                            lineHeight = 21.sp,
-                            color = Color(0xFFFFF8EA)
-                        )
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Black.copy(alpha = 0.55f)
-                ) {
                     Text(
-                        text = book.format.name,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
+                        text = book.title,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 5.dp),
+                        textAlign = TextAlign.Center,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        lineHeight = 16.sp,
+                        color = Color(0xFFFFF8EA)
                     )
                 }
             }
         }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(9.dp)
-                .shadow(5.dp, RoundedCornerShape(3.dp))
-                .background(
-                    Color(0xFF806044),
-                    RoundedCornerShape(3.dp)
-                )
-        )
     }
 }
 
