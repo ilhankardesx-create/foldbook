@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 
 enum class BookFormat { EPUB, PDF }
+enum class ReaderThemeOption { LIGHT, SEPIA, DARK }
 
 data class LibraryBook(
     val title: String,
@@ -16,6 +17,7 @@ object LibraryStore {
     private const val PREFS = "foldbook_library"
     private const val KEY_FOLDER_URI = "book_folder_uri"
     private const val KEY_PROGRESS_PREFIX = "reading_progress_"
+    private const val KEY_READER_THEME = "reader_theme"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -30,6 +32,21 @@ object LibraryStore {
             ?: return null
 
         return runCatching { Uri.parse(value) }.getOrNull()
+    }
+
+    fun saveReaderTheme(context: Context, theme: ReaderThemeOption) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_READER_THEME, theme.name)
+            .apply()
+    }
+
+    fun readReaderTheme(context: Context): ReaderThemeOption {
+        val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_READER_THEME, ReaderThemeOption.LIGHT.name)
+
+        return runCatching { ReaderThemeOption.valueOf(value.orEmpty()) }
+            .getOrDefault(ReaderThemeOption.LIGHT)
     }
 
     fun saveProgress(
