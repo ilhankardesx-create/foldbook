@@ -12,6 +12,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,6 +27,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -38,6 +42,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -84,8 +89,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -100,7 +107,6 @@ import androidx.window.layout.WindowLayoutInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.math.abs
 
@@ -166,6 +172,7 @@ private val LocalReaderPalette = staticCompositionLocalOf {
 
 private val LocalReaderFontSize = staticCompositionLocalOf { ReaderFontSize.MEDIUM }
 private val LocalReaderPageCount = staticCompositionLocalOf { 0 }
+private val LocalAddNote = staticCompositionLocalOf<(String, Int) -> Unit> { { _, _ -> } }
 
 private fun fontSizeSp(size: ReaderFontSize): Float = when (size) {
     ReaderFontSize.SMALL -> 16f
@@ -528,6 +535,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 ReaderScreen(
                     book = book,
                     bookKey = readerKey,
+                    bookTitle = readerTitle,
                     hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
                     onBack = ::closeReader
                 )
@@ -573,6 +581,8 @@ private fun LibraryScreen(
 
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
     var supportVisible by rememberSaveable { mutableStateOf(false) }
+    var notesVisible by rememberSaveable { mutableStateOf(false) }
+    var notes by remember { mutableStateOf(LibraryStore.readNotes(context)) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var actionBook by remember { mutableStateOf<LibraryBook?>(null) }
     var renameBookTarget by remember { mutableStateOf<LibraryBook?>(null) }
@@ -602,6 +612,82 @@ private fun LibraryScreen(
                 book.title.contains(query, ignoreCase = true)
             }
         }
+    }
+
+    if (notesVisible) {
+        AlertDialog(
+            onDismissRequest = { notesVisible = false },
+            title = {
+                Text(
+                    text = "Notlar",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                if (notes.isEmpty()) {
+                    Text(
+                        text = "Henüz not eklenmemiş.",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 480.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        notes.forEach { note ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = note.bookTitle,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+
+                                    Text(
+                                        text = "Sayfa ${note.pageNumber}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                                    )
+
+                                    Text(
+                                        text = note.text,
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
+                                    )
+
+                                    TextButton(
+                                        onClick = {
+                                            LibraryStore.deleteNote(context, note.id)
+                                            notes = LibraryStore.readNotes(context)
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "Notu Sil",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { notesVisible = false }) {
+                    Text("Kapat")
+                }
+            }
+        )
     }
 
     actionBook?.let { book ->
@@ -827,15 +913,22 @@ private fun LibraryScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Button(
+                TextButton(
+                    onClick = {
+                        notes = LibraryStore.readNotes(context)
+                        notesVisible = true
+                    }
+                ) {
+                    Text("Notlar")
+                }
+
+                TextButton(
                     onClick = { settingsVisible = !settingsVisible }
                 ) {
                     Text("Ayarlar")
                 }
 
-                Spacer(Modifier.width(6.dp))
-
-                Button(
+                TextButton(
                     onClick = {
                         supportBilling.clearMessage()
                         supportVisible = true
@@ -949,7 +1042,7 @@ private fun LibraryScreen(
                         )
 
                         Text(
-                            text = "v0.9.8",
+                            text = "v0.9.9",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                         )
@@ -1101,18 +1194,8 @@ private fun ShelfBook(
             .shadow(6.dp, RoundedCornerShape(5.dp))
             .pointerInput(book.uri) {
                 detectTapGestures(
-                    onPress = {
-                        val released = withTimeoutOrNull(2_000L) {
-                            tryAwaitRelease()
-                        }
-
-                        if (released == null) {
-                            onLongPress()
-                            tryAwaitRelease()
-                        } else if (released) {
-                            onClick()
-                        }
-                    }
+                    onTap = { onClick() },
+                    onLongPress = { onLongPress() }
                 )
             },
         shape = RoundedCornerShape(5.dp),
@@ -1184,6 +1267,7 @@ private fun ShelfBook(
 private fun ReaderScreen(
     book: EpubBook,
     bookKey: String,
+    bookTitle: String,
     hasSeparatingVerticalHinge: Boolean,
     onBack: () -> Unit
 ) {
@@ -1457,33 +1541,50 @@ private fun ReaderScreen(
                         }
                     }
 
-                    BookSpread(
-                        pages = pages,
-                        bookKey = bookKey,
-                        initialPageIndex = savedPage,
-                        onPageChanged = { pageIndex ->
-                            LibraryStore.saveProgress(
+                    CompositionLocalProvider(
+                        LocalAddNote provides { text, pageNumber ->
+                            LibraryStore.addNote(
                                 context = context,
                                 bookUri = bookKey,
-                                pageIndex = pageIndex
+                                bookTitle = bookTitle,
+                                pageNumber = pageNumber,
+                                text = text
                             )
+                            Toast.makeText(
+                                context,
+                                "Notlara eklendi.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    ) {
+                        BookSpread(
+                            pages = pages,
+                            bookKey = bookKey,
+                            initialPageIndex = savedPage,
+                            onPageChanged = { pageIndex ->
+                                LibraryStore.saveProgress(
+                                    context = context,
+                                    bookUri = bookKey,
+                                    pageIndex = pageIndex
+                                )
 
-                            currentSpreadIndex = pageIndex
+                                currentSpreadIndex = pageIndex
 
-                            if (ttsActive) {
-                                tts.stop()
-                                ttsReadPageIndex = pageIndex
-                                ttsCharOffset = 0
+                                if (ttsActive) {
+                                    tts.stop()
+                                    ttsReadPageIndex = pageIndex
+                                    ttsCharOffset = 0
 
-                                if (!ttsPaused) {
-                                    speakRequestToken++
+                                    if (!ttsPaused) {
+                                        speakRequestToken++
+                                    }
                                 }
-                            }
-                        },
-                        twoPage = twoPage,
-                        autoForwardToken = autoForwardToken,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                            },
+                            twoPage = twoPage,
+                            autoForwardToken = autoForwardToken,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
 
                     AnimatedVisibility(
                         visible = controlsVisible,
@@ -2060,7 +2161,29 @@ private fun BookPage(
     val palette = LocalReaderPalette.current
     val readerFontSize = LocalReaderFontSize.current
     val totalPages = LocalReaderPageCount.current
+    val addNote = LocalAddNote.current
     val bodySize = fontSizeSp(readerFontSize)
+    val bodyText = page?.body.orEmpty()
+
+    var bodyValue by remember(bodyText) {
+        mutableStateOf(TextFieldValue(bodyText))
+    }
+
+    val selectionStart = minOf(
+        bodyValue.selection.start,
+        bodyValue.selection.end
+    ).coerceIn(0, bodyText.length)
+
+    val selectionEnd = maxOf(
+        bodyValue.selection.start,
+        bodyValue.selection.end
+    ).coerceIn(0, bodyText.length)
+
+    val selectedText = if (selectionEnd > selectionStart) {
+        bodyText.substring(selectionStart, selectionEnd).trim()
+    } else {
+        ""
+    }
 
     Surface(
         modifier = modifier
@@ -2086,17 +2209,53 @@ private fun BookPage(
                 Spacer(Modifier.size(16.dp))
             }
 
-            Text(
-                text = page?.body.orEmpty(),
-                fontSize = bodySize.sp,
-                lineHeight = (bodySize + 11f).sp,
-                fontFamily = FontFamily.Serif,
-                color = palette.text.copy(
-                    alpha = if (isBackSide) 0.88f else 1f
-                )
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                if (isBackSide) {
+                    Text(
+                        text = bodyText,
+                        fontSize = bodySize.sp,
+                        lineHeight = (bodySize + 11f).sp,
+                        fontFamily = FontFamily.Serif,
+                        color = palette.text.copy(alpha = 0.88f)
+                    )
+                } else {
+                    BasicTextField(
+                        value = bodyValue,
+                        onValueChange = { next ->
+                            bodyValue = TextFieldValue(
+                                text = bodyText,
+                                selection = next.selection
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        readOnly = true,
+                        textStyle = TextStyle(
+                            fontSize = bodySize.sp,
+                            lineHeight = (bodySize + 11f).sp,
+                            fontFamily = FontFamily.Serif,
+                            color = palette.text
+                        )
+                    )
 
-            Spacer(Modifier.weight(1f))
+                    if (selectedText.isNotBlank()) {
+                        Button(
+                            onClick = {
+                                addNote(selectedText, pageNumber)
+                                bodyValue = TextFieldValue(bodyText)
+                            },
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(bottom = 4.dp)
+                        ) {
+                            Text("Notlara Ekle")
+                        }
+                    }
+                }
+            }
 
             if (page != null && pageNumber > 0) {
                 Text(
@@ -2105,7 +2264,9 @@ private fun BookPage(
                     } else {
                         pageNumber.toString()
                     },
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(top = 6.dp),
                     fontSize = 12.sp,
                     color = palette.text.copy(alpha = 0.50f)
                 )
