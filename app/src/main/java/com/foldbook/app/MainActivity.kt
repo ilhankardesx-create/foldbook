@@ -1,6 +1,8 @@
 package com.foldbook.app
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,12 +11,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -46,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -57,8 +62,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -198,6 +205,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     var readerError by remember { mutableStateOf<String?>(null) }
     var readerTitle by remember { mutableStateOf("") }
     var readerKey by remember { mutableStateOf("") }
+    var readerFormat by remember { mutableStateOf(BookFormat.EPUB) }
     var readerPages by remember { mutableStateOf<List<ReaderPage>>(emptyList()) }
 
     LaunchedEffect(reading) {
@@ -235,6 +243,15 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
         scope.launch {
             readerLoading = true
             readerError = null
+            readerKey = book.uri
+            readerFormat = book.format
+
+            if (book.format == BookFormat.PDF) {
+                readerTitle = book.title
+                reading = true
+                readerLoading = false
+                return@launch
+            }
 
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -247,7 +264,6 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 } else {
                     readerPages = pages
                     readerTitle = epub.title.ifBlank { book.title }
-                    readerKey = book.uri
                     reading = true
                 }
             }.onFailure {
@@ -283,15 +299,26 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     }
 
     if (reading) {
-        ReaderScreen(
-            pages = readerPages,
-            bookKey = readerKey,
-            hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
-            onBack = {
-                reading = false
-                readerError = null
-            }
-        )
+        if (readerFormat == BookFormat.PDF) {
+            PdfReaderScreen(
+                bookKey = readerKey,
+                hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
+                onBack = {
+                    reading = false
+                    readerError = null
+                }
+            )
+        } else {
+            ReaderScreen(
+                pages = readerPages,
+                bookKey = readerKey,
+                hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
+                onBack = {
+                    reading = false
+                    readerError = null
+                }
+            )
+        }
     } else {
         LibraryScreen(
             books = library,
@@ -442,7 +469,7 @@ private fun EmptyLibrary(
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = "EPUB kitaplarının bulunduğu klasörü bir kez seç. FoldBook klasörü hatırlayıp kitaplarını burada rafa dizecek.",
+                text = "EPUB ve PDF kitaplarının bulunduğu klasörü bir kez seç. FoldBook klasörü hatırlayıp kitaplarını burada rafa dizecek.",
                 modifier = Modifier.fillMaxWidth(0.72f),
                 textAlign = TextAlign.Center,
                 fontSize = 15.sp,
@@ -464,6 +491,23 @@ private fun ShelfBook(
     book: LibraryBook,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val coverBitmap by produceState<Bitmap?>(
+        initialValue = null,
+        key1 = book.uri,
+        key2 = book.format
+    ) {
+        value = if (book.format == BookFormat.EPUB) {
+            withContext(Dispatchers.IO) {
+                EpubLoader.loadCover(context, Uri.parse(book.uri))?.let { bytes ->
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }
+            }
+        } else {
+            null
+        }
+    }
+
     val covers = listOf(
         Color(0xFF6D4937),
         Color(0xFF425B4D),
@@ -487,40 +531,61 @@ private fun ShelfBook(
             color = coverColor
         ) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(14.dp)
+                modifier = Modifier.fillMaxSize()
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(5.dp)
-                        .align(Alignment.CenterStart)
-                        .background(Color.Black.copy(alpha = 0.13f))
-                )
+                if (coverBitmap != null) {
+                    Image(
+                        bitmap = coverBitmap!!.asImageBitmap(),
+                        contentDescription = book.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(14.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(5.dp)
+                                .align(Alignment.CenterStart)
+                                .background(Color.Black.copy(alpha = 0.13f))
+                        )
 
-                Text(
-                    text = book.title,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(horizontal = 8.dp),
-                    textAlign = TextAlign.Center,
-                    maxLines = 6,
-                    overflow = TextOverflow.Ellipsis,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
-                    lineHeight = 21.sp,
-                    color = Color(0xFFFFF8EA)
-                )
+                        Text(
+                            text = book.title,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(horizontal = 8.dp),
+                            textAlign = TextAlign.Center,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            lineHeight = 21.sp,
+                            color = Color(0xFFFFF8EA)
+                        )
+                    }
+                }
 
-                Text(
-                    text = "EPUB",
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White.copy(alpha = 0.68f)
-                )
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.Black.copy(alpha = 0.55f)
+                ) {
+                    Text(
+                        text = book.format.name,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                }
             }
         }
 
