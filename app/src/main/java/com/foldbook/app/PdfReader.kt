@@ -135,7 +135,6 @@ private class PdfBookDocument(
                 return output
             }
         }
-        }
     }
 
     override fun close() {
