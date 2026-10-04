@@ -11,7 +11,9 @@ enum class ReaderFontSize { SMALL, MEDIUM, LARGE }
 data class LibraryBook(
     val title: String,
     val uri: String,
-    val format: BookFormat
+    val format: BookFormat,
+    val modifiedAt: Long = 0L,
+    val isFavorite: Boolean = false
 )
 
 object LibraryStore {
@@ -24,6 +26,7 @@ object LibraryStore {
     private const val KEY_ACTIVE_BOOK_URI = "active_book_uri"
     private const val KEY_ACTIVE_BOOK_TITLE = "active_book_title"
     private const val KEY_ACTIVE_BOOK_FORMAT = "active_book_format"
+    private const val KEY_FAVORITES = "favorite_book_uris"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -73,7 +76,8 @@ object LibraryStore {
         return LibraryBook(
             title = title.ifBlank { "Kitap" },
             uri = uri,
-            format = format
+            format = format,
+            isFavorite = isFavorite(context, uri)
         )
     }
 
@@ -82,11 +86,6 @@ object LibraryStore {
             .edit()
             .putString(KEY_LAST_OPENED_URI, bookUri)
             .apply()
-    }
-
-    private fun lastOpened(context: Context): String? {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_LAST_OPENED_URI, null)
     }
 
     fun saveReaderTheme(context: Context, theme: ReaderThemeOption) {
@@ -145,6 +144,126 @@ object LibraryStore {
         return KEY_PROGRESS_PREFIX + bookUri.hashCode().toString()
     }
 
+    fun isFavorite(context: Context, bookUri: String): Boolean {
+        return favorites(context).contains(bookUri)
+    }
+
+    fun setFavorite(
+        context: Context,
+        bookUri: String,
+        favorite: Boolean
+    ) {
+        val updated = favorites(context).toMutableSet()
+        if (favorite) {
+            updated += bookUri
+        } else {
+            updated -= bookUri
+        }
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet(KEY_FAVORITES, updated)
+            .apply()
+    }
+
+    fun toggleFavorite(context: Context, book: LibraryBook): Boolean {
+        val newValue = !isFavorite(context, book.uri)
+        setFavorite(context, book.uri, newValue)
+        return newValue
+    }
+
+    private fun favorites(context: Context): Set<String> {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet(KEY_FAVORITES, emptySet())
+            ?.toSet()
+            ?: emptySet()
+    }
+
+    fun renameBook(
+        context: Context,
+        book: LibraryBook,
+        requestedTitle: String
+    ): String {
+        val file = DocumentFile.fromSingleUri(context, Uri.parse(book.uri))
+            ?: error("Kitap dosyasına erişilemedi.")
+
+        val originalName = file.name.orEmpty()
+        val extension = originalName
+            .substringAfterLast('.', book.format.name.lowercase())
+            .lowercase()
+
+        val safeTitle = requestedTitle
+            .trim()
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { error("Kitap adı boş olamaz.") }
+
+        val newFileName = "$safeTitle.$extension"
+        if (originalName.equals(newFileName, ignoreCase = false)) {
+            return book.uri
+        }
+
+        val oldUri = book.uri
+        val oldProgress = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(progressKey(oldUri), 0)
+        val wasFavorite = isFavorite(context, oldUri)
+
+        if (!file.renameTo(newFileName)) {
+            error("Kitap yeniden adlandırılamadı. Klasör için yazma izni gerekebilir.")
+        }
+
+        val newUri = file.uri.toString()
+
+        if (newUri != oldUri) {
+            val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove(progressKey(oldUri))
+                .putInt(progressKey(newUri), oldProgress)
+
+            val lastOpened = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_LAST_OPENED_URI, null)
+            if (lastOpened == oldUri) {
+                editor.putString(KEY_LAST_OPENED_URI, newUri)
+            }
+            editor.apply()
+
+            if (wasFavorite) {
+                setFavorite(context, oldUri, false)
+                setFavorite(context, newUri, true)
+            }
+        }
+
+        return newUri
+    }
+
+    fun deleteBook(context: Context, book: LibraryBook) {
+        val file = DocumentFile.fromSingleUri(context, Uri.parse(book.uri))
+            ?: error("Kitap dosyasına erişilemedi.")
+
+        if (!file.delete()) {
+            error("Kitap silinemedi. Klasör için yazma izni gerekebilir.")
+        }
+
+        setFavorite(context, book.uri, false)
+
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+            .remove(progressKey(book.uri))
+
+        if (prefs.getString(KEY_LAST_OPENED_URI, null) == book.uri) {
+            editor.remove(KEY_LAST_OPENED_URI)
+        }
+        if (prefs.getString(KEY_ACTIVE_BOOK_URI, null) == book.uri) {
+            editor
+                .remove(KEY_ACTIVE_BOOK_URI)
+                .remove(KEY_ACTIVE_BOOK_TITLE)
+                .remove(KEY_ACTIVE_BOOK_FORMAT)
+        }
+
+        editor.apply()
+    }
+
     fun scanFolder(context: Context, treeUri: Uri): List<LibraryBook> {
         val root = DocumentFile.fromTreeUri(context, treeUri)
             ?: error("Seçilen klasör açılamadı.")
@@ -156,12 +275,13 @@ object LibraryStore {
         val result = mutableListOf<LibraryBook>()
         collectBooks(root, result)
 
-        val lastOpenedUri = lastOpened(context)
-
         return result
             .distinctBy { it.uri }
+            .map { book ->
+                book.copy(isFavorite = isFavorite(context, book.uri))
+            }
             .sortedWith(
-                compareBy<LibraryBook> { if (it.uri == lastOpenedUri) 0 else 1 }
+                compareByDescending<LibraryBook> { it.modifiedAt }
                     .thenBy { it.title.lowercase() }
             )
     }
@@ -191,7 +311,8 @@ object LibraryStore {
                     output += LibraryBook(
                         title = title,
                         uri = file.uri.toString(),
-                        format = format
+                        format = format,
+                        modifiedAt = file.lastModified()
                     )
                 }
             }
