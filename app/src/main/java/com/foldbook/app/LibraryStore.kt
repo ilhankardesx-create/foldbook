@@ -18,6 +18,7 @@ object LibraryStore {
     private const val KEY_FOLDER_URI = "book_folder_uri"
     private const val KEY_PROGRESS_PREFIX = "reading_progress_"
     private const val KEY_READER_THEME = "reader_theme"
+    private const val KEY_LAST_OPENED_URI = "last_opened_uri"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -32,6 +33,18 @@ object LibraryStore {
             ?: return null
 
         return runCatching { Uri.parse(value) }.getOrNull()
+    }
+
+    fun saveLastOpened(context: Context, bookUri: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LAST_OPENED_URI, bookUri)
+            .apply()
+    }
+
+    private fun lastOpened(context: Context): String? {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_OPENED_URI, null)
     }
 
     fun saveReaderTheme(context: Context, theme: ReaderThemeOption) {
@@ -86,9 +99,14 @@ object LibraryStore {
         val result = mutableListOf<LibraryBook>()
         collectBooks(root, result)
 
+        val lastOpenedUri = lastOpened(context)
+
         return result
             .distinctBy { it.uri }
-            .sortedBy { it.title.lowercase() }
+            .sortedWith(
+                compareBy<LibraryBook> { if (it.uri == lastOpenedUri) 0 else 1 }
+                    .thenBy { it.title.lowercase() }
+            )
     }
 
     private fun collectBooks(
