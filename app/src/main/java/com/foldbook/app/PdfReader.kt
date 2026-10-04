@@ -73,7 +73,7 @@ private class PdfBookDocument(
             ?: error("PDF açılamadı.")
     private val renderer = PdfRenderer(descriptor)
 
-    private val pageCache = object : LruCache<String, Bitmap>(32 * 1024) {
+    private val pageCache = object : LruCache<String, Bitmap>(64 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int {
             return (value.byteCount / 1024).coerceAtLeast(1)
         }
@@ -81,6 +81,19 @@ private class PdfBookDocument(
 
     val pageCount: Int
         get() = renderer.pageCount
+
+    @Synchronized
+    fun cachedPage(
+        index: Int,
+        targetWidth: Int,
+        theme: ReaderThemeOption = ReaderThemeOption.LIGHT
+    ): Bitmap? {
+        if (pageCount <= 0) return null
+        val safeIndex = index.coerceIn(0, pageCount - 1)
+        val renderWidth = ((targetWidth.coerceIn(720, 2400) / 64) * 64)
+            .coerceAtLeast(720)
+        return pageCache.get("$safeIndex:$renderWidth:${theme.name}")
+    }
 
     @Synchronized
     fun renderPage(
@@ -465,9 +478,11 @@ private fun PdfSpread(
                 )
             } else {
                 listOf(
-                    pageIndex - 1,
                     pageIndex,
-                    pageIndex + 1
+                    pageIndex + 1,
+                    pageIndex - 1,
+                    pageIndex + 2,
+                    pageIndex - 2
                 )
             }
 
@@ -676,11 +691,12 @@ private fun PdfSinglePageSpread(
             PdfTurningPage(
                 document = document,
                 frontIndex = pageIndex,
-                backIndex = null,
+                backIndex = targetIndex,
                 progress = progress,
                 direction = turnDirection,
                 theme = theme,
                 renderWidthPx = renderWidthPx,
+                cameraDistanceValue = 70f,
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(4f)
@@ -698,6 +714,7 @@ private fun PdfTurningPage(
     direction: Int,
     theme: ReaderThemeOption,
     renderWidthPx: Int,
+    cameraDistanceValue: Float = 30f,
     modifier: Modifier = Modifier
 ) {
     val p = progress.coerceIn(0f, 1f)
@@ -713,7 +730,7 @@ private fun PdfTurningPage(
         modifier = modifier.graphicsLayer {
             transformOrigin = origin
             rotationY = rotation
-            cameraDistance = 30f
+            cameraDistance = cameraDistanceValue
             shadowElevation = 20f * (1f - abs(0.5f - p) * 2f)
             scaleY = 1f - (0.012f * (1f - abs(0.5f - p) * 2f))
         }
@@ -771,7 +788,7 @@ private fun PdfPage(
     }
 
     val bitmap by produceState<Bitmap?>(
-        initialValue = null,
+        initialValue = document.cachedPage(index, renderWidthPx, theme),
         key1 = document,
         key2 = index,
         key3 = "$theme:$renderWidthPx"

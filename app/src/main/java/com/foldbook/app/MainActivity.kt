@@ -1098,7 +1098,7 @@ private fun LibraryScreen(
                             )
 
                             Text(
-                                text = "v0.9.20",
+                                text = "v0.9.21",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                             )
@@ -2216,11 +2216,12 @@ private fun SinglePageSpread(
             TurningPage(
                 frontPage = pages.getOrNull(pageIndex),
                 frontNumber = pageIndex + 1,
-                backPage = null,
-                backNumber = 0,
+                backPage = pages.getOrNull(targetIndex),
+                backNumber = targetIndex + 1,
                 progress = progress,
                 direction = turnDirection,
                 curlY = curlY,
+                cameraDistanceValue = 70f,
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(4f)
@@ -2239,6 +2240,7 @@ private fun TurningPage(
     direction: Int,
     curlY: Float,
     crossSpine: Boolean = false,
+    cameraDistanceValue: Float = 30f,
     modifier: Modifier = Modifier
 ) {
     val p = progress.coerceIn(0f, 1f)
@@ -2264,7 +2266,7 @@ private fun TurningPage(
                 direction == 1 -> -spineShiftPx
                 else -> spineShiftPx
             }
-            cameraDistance = 30f
+            cameraDistance = cameraDistanceValue
             shadowElevation = 18f * (1f - abs(0.5f - p) * 2f)
             scaleY = 1f
         }
