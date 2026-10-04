@@ -1,0 +1,62 @@
+name: FoldBook PDF Turn Stability 0.9.24
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply PDF turn patch
+        run: python3 scripts/pdf_turn_patch_024.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build debug APK and release AAB
+        run: gradle assembleDebug bundleRelease --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldbook-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldbook-release-aab
+          path: app/build/outputs/bundle/release/app-release.aab
+
+      - name: Commit patch and remove helpers
+        shell: bash
+        run: |
+          rm -f scripts/pdf_turn_patch_024.py .github/workflows/pdf-turn-024-run.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/foldbook/app/PdfReader.kt app/src/main/java/com/foldbook/app/MainActivity.kt app/build.gradle.kts scripts/pdf_turn_patch_024.py .github/workflows/pdf-turn-024-run.yml
+          git commit -m 'Stabilize PDF page turns on phone and fold' || exit 0
+          git push
