@@ -98,9 +98,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -575,6 +578,7 @@ private fun LibraryScreen(
 ) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
+    val density = LocalDensity.current
     val supportBilling = remember(activity) {
         SupportBillingManager(activity)
     }
@@ -954,109 +958,122 @@ private fun LibraryScreen(
                 shape = RoundedCornerShape(22.dp)
             )
 
-            AnimatedVisibility(visible = settingsVisible) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surface
+            if (settingsVisible) {
+                val popupOffsetY = with(density) { 168.dp.roundToPx() }
+
+                Popup(
+                    alignment = Alignment.TopCenter,
+                    offset = IntOffset(0, popupOffsetY),
+                    onDismissRequest = { settingsVisible = false },
+                    properties = PopupProperties(
+                        focusable = true,
+                        dismissOnBackPress = true,
+                        dismissOnClickOutside = true
+                    )
                 ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth(0.94f)
+                            .shadow(10.dp, RoundedCornerShape(18.dp)),
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surface
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Button(
-                                onClick = onChooseFolder,
-                                enabled = !isLoading,
-                                modifier = Modifier.weight(1f)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    if (isLoading) {
-                                        "Taranıyor…"
-                                    } else {
-                                        "Kitapların Olduğu Klasörü Seç"
-                                    },
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-
-                            Button(
-                                onClick = onRefresh,
-                                enabled = !isLoading
-                            ) {
-                                Text("Yenile")
-                            }
-                        }
-
-                        Text(
-                            text = "Tema",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                ReaderThemeOption.LIGHT to "Açık",
-                                ReaderThemeOption.SEPIA to "Sepya",
-                                ReaderThemeOption.DARK to "Koyu"
-                            ).forEach { (option, label) ->
                                 Button(
-                                    onClick = {
-                                        selectedTheme = option
-                                        LibraryStore.saveReaderTheme(context, option)
-                                    }
+                                    onClick = onChooseFolder,
+                                    enabled = !isLoading,
+                                    modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
-                                        if (selectedTheme == option) "✓ $label" else label
+                                        if (isLoading) {
+                                            "Taranıyor…"
+                                        } else {
+                                            "Kitapların Olduğu Klasörü Seç"
+                                        },
+                                        textAlign = TextAlign.Center
                                     )
                                 }
-                            }
-                        }
 
-                        Text(
-                            text = "EPUB yazı boyutu",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                ReaderFontSize.SMALL to "Küçük",
-                                ReaderFontSize.MEDIUM to "Orta",
-                                ReaderFontSize.LARGE to "Büyük"
-                            ).forEach { (option, label) ->
                                 Button(
-                                    onClick = {
-                                        selectedFontSize = option
-                                        LibraryStore.saveReaderFontSize(context, option)
-                                    }
+                                    onClick = onRefresh,
+                                    enabled = !isLoading
                                 ) {
-                                    Text(
-                                        if (selectedFontSize == option) "✓ $label" else label
-                                    )
+                                    Text("Yenile")
                                 }
                             }
+
+                            Text(
+                                text = "Tema",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    ReaderThemeOption.LIGHT to "Açık",
+                                    ReaderThemeOption.SEPIA to "Sepya",
+                                    ReaderThemeOption.DARK to "Koyu"
+                                ).forEach { (option, label) ->
+                                    Button(
+                                        onClick = {
+                                            selectedTheme = option
+                                            LibraryStore.saveReaderTheme(context, option)
+                                        }
+                                    ) {
+                                        Text(
+                                            if (selectedTheme == option) "✓ $label" else label
+                                        )
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "EPUB yazı boyutu",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    ReaderFontSize.SMALL to "Küçük",
+                                    ReaderFontSize.MEDIUM to "Orta",
+                                    ReaderFontSize.LARGE to "Büyük"
+                                ).forEach { (option, label) ->
+                                    Button(
+                                        onClick = {
+                                            selectedFontSize = option
+                                            LibraryStore.saveReaderFontSize(context, option)
+                                        }
+                                    ) {
+                                        Text(
+                                            if (selectedFontSize == option) "✓ $label" else label
+                                        )
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "PDF sabit sayfa düzenini korur; tema PDF'ye de uygulanır.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                            )
+
+                            Text(
+                                text = "v0.9.11",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
+                            )
                         }
-
-                        Text(
-                            text = "PDF sabit sayfa düzenini korur; tema PDF'ye de uygulanır.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
-                        )
-
-                        Text(
-                            text = "v0.9.10",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
-                        )
                     }
                 }
             }
