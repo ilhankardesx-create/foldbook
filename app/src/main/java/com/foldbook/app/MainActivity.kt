@@ -279,6 +279,9 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     }
 
     fun openBook(book: LibraryBook) {
+        LibraryStore.saveLastOpened(context, book.uri)
+        library = listOf(book) + library.filterNot { it.uri == book.uri }
+
         scope.launch {
             readerLoading = true
             readerError = null
