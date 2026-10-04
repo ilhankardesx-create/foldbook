@@ -391,6 +391,9 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             isLoading = libraryLoading || readerLoading,
             error = libraryError ?: readerError,
             onChooseFolder = { folderPicker.launch(null) },
+            onRefresh = {
+                LibraryStore.savedFolder(context)?.let { scanFolder(it) }
+            },
             onBookClick = ::openBook
         )
     }
@@ -402,6 +405,7 @@ private fun LibraryScreen(
     isLoading: Boolean,
     error: String?,
     onChooseFolder: () -> Unit,
+    onRefresh: () -> Unit,
     onBookClick: (LibraryBook) -> Unit
 ) {
     val context = LocalContext.current
@@ -458,7 +462,7 @@ private fun LibraryScreen(
                 }
 
                 Text(
-                    text = "v0.9.1",
+                    text = "v0.9.2",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
@@ -476,6 +480,13 @@ private fun LibraryScreen(
                     enabled = !isLoading
                 ) {
                     Text(if (isLoading) "Taranıyor…" else "Klasör Seç")
+                }
+
+                Button(
+                    onClick = onRefresh,
+                    enabled = !isLoading
+                ) {
+                    Text("Yenile")
                 }
 
                 Button(
@@ -779,9 +790,12 @@ private fun ReaderScreen(
     }
 
     var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
-    val theme = remember(bookKey) {
-        LibraryStore.readReaderTheme(context)
+    var themeName by rememberSaveable(bookKey) {
+        mutableStateOf(LibraryStore.readReaderTheme(context).name)
     }
+    val theme = runCatching {
+        ReaderThemeOption.valueOf(themeName)
+    }.getOrDefault(ReaderThemeOption.LIGHT)
     val fontSize = remember(bookKey) {
         LibraryStore.readReaderFontSize(context)
     }
@@ -835,10 +849,26 @@ private fun ReaderScreen(
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Button(onClick = onBack) {
                                 Text("Rafa Dön")
+                            }
+
+                            listOf(
+                                ReaderThemeOption.LIGHT to "Açık",
+                                ReaderThemeOption.SEPIA to "Sepya",
+                                ReaderThemeOption.DARK to "Koyu"
+                            ).forEach { (option, label) ->
+                                Button(
+                                    onClick = {
+                                        themeName = option.name
+                                        LibraryStore.saveReaderTheme(context, option)
+                                    }
+                                ) {
+                                    Text(label)
+                                }
                             }
                         }
                     }
