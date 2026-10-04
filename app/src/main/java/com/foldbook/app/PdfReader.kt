@@ -88,6 +88,14 @@ private class PdfBookDocument(
     }
 }
 
+fun loadPdfCover(context: Context, uri: Uri): Bitmap? {
+    return runCatching {
+        PdfBookDocument(context, uri).use { document ->
+            if (document.pageCount > 0) document.renderPage(0, 700) else null
+        }
+    }.getOrNull()
+}
+
 @Composable
 fun PdfReaderScreen(
     bookKey: String,
