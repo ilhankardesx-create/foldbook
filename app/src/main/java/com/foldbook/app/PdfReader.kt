@@ -410,7 +410,7 @@ private fun PdfSpread(
     val step = if (twoPage) 2 else 1
     val progress = if (settling) settleAnimation.value else dragProgress
     val densityInfo = LocalDensity.current
-    val spineWidthPx = with(densityInfo) { 8.dp.toPx() }
+    val spineWidthPx = with(densityInfo) { 10.dp.toPx() }
     val renderScale = if (twoPage) 1.45f else 1.15f
     val renderWidthPx = (pageWidthPx * renderScale).toInt().coerceIn(820, 2200)
 
@@ -695,7 +695,8 @@ private fun PdfTwoPageSpread(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxSize()
-                .padding(vertical = 3.dp)
+                .padding(vertical = 4.dp)
+                .zIndex(if (isBackward) 3f else 0f)
         ) {
             val leftIndex = if (isBackward) pageIndex - 2 else pageIndex
 
@@ -724,18 +725,14 @@ private fun PdfTwoPageSpread(
             }
         }
 
-        Box(
-            modifier = Modifier
-                .width(8.dp)
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.14f))
-        )
+        PdfBookSpine(progress = progress)
 
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxSize()
-                .padding(vertical = 3.dp)
+                .padding(vertical = 4.dp)
+                .zIndex(if (isForward) 3f else 0f)
         ) {
             val rightIndex = if (isForward) pageIndex + 3 else pageIndex + 1
 
@@ -764,6 +761,21 @@ private fun PdfTwoPageSpread(
             }
         }
     }
+}
+
+@Composable
+private fun PdfBookSpine(progress: Float) {
+    val strength = 0.07f + (0.10f * (1f - abs(0.5f - progress) * 2f))
+    Box(
+        modifier = Modifier
+            .width(10.dp)
+            .fillMaxSize()
+            .padding(vertical = 4.dp)
+            .background(
+                Color.Black.copy(alpha = strength.coerceIn(0.05f, 0.17f)),
+                RoundedCornerShape(50)
+            )
+    )
 }
 
 @Composable
@@ -879,23 +891,36 @@ private fun PdfTurningPage(
         TransformOrigin(1f, 0.5f)
     }
     val spineShiftPx = if (crossSpine) {
-        with(LocalDensity.current) { 8.dp.toPx() } * p
+        with(LocalDensity.current) { 10.dp.toPx() } * p
     } else {
         0f
+    }
+
+    // EPUB motorunda olduğu gibi, dönen yaprağın iki yüzünü dönüş başlamadan
+    // sabitliyoruz. Animasyon sırasında PdfPage yeniden render/recompose edilmez.
+    val frontBitmap = remember(document, frontIndex, renderWidthPx, theme) {
+        frontIndex
+            ?.takeIf { it in 0 until document.pageCount }
+            ?.let { document.cachedPage(it, renderWidthPx, theme) }
+    }
+    val backBitmap = remember(document, backIndex, renderWidthPx, theme) {
+        backIndex
+            ?.takeIf { it in 0 until document.pageCount }
+            ?.let { document.cachedPage(it, renderWidthPx, theme) }
     }
 
     Box(
         modifier = modifier.graphicsLayer {
             transformOrigin = origin
             rotationY = rotation
-            cameraDistance = cameraDistanceValue
             translationX = when {
                 !crossSpine -> 0f
                 direction == 1 -> -spineShiftPx
                 else -> spineShiftPx
             }
-            shadowElevation = 20f * (1f - abs(0.5f - p) * 2f)
-            scaleY = 1f - (0.012f * (1f - abs(0.5f - p) * 2f))
+            cameraDistance = cameraDistanceValue
+            shadowElevation = 18f * (1f - abs(0.5f - p) * 2f)
+            scaleY = 1f
         }
     ) {
         Box(
@@ -905,34 +930,73 @@ private fun PdfTurningPage(
                     if (showingBack) scaleX = -1f
                 }
         ) {
-            PdfPage(
-                document = document,
-                index = if (showingBack && backIndex != null) {
-                    backIndex
-                } else {
-                    frontIndex
-                },
+            PdfFrozenPage(
+                bitmap = if (showingBack) backBitmap else frontBitmap,
+                index = if (showingBack) backIndex else frontIndex,
                 theme = theme,
-                renderWidthPx = renderWidthPx,
                 modifier = Modifier.fillMaxSize()
             )
 
-            val edgeAlpha =
-                0.22f * (1f - abs(0.5f - p) * 2f)
-
+            val edgeAlpha = 0.18f * (1f - abs(0.5f - p) * 2f)
             Box(
                 modifier = Modifier
                     .align(
-                        if (direction == 1) {
-                            Alignment.CenterStart
-                        } else {
-                            Alignment.CenterEnd
-                        }
+                        if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd
                     )
-                    .width(24.dp)
+                    .width(26.dp)
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = edgeAlpha))
             )
+        }
+    }
+}
+
+@Composable
+private fun PdfFrozenPage(
+    bitmap: Bitmap?,
+    index: Int?,
+    theme: ReaderThemeOption,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .shadow(6.dp, RoundedCornerShape(7.dp))
+            .clip(RoundedCornerShape(7.dp)),
+        color = when (theme) {
+            ReaderThemeOption.LIGHT -> Color(0xFFF5F2EA)
+            ReaderThemeOption.SEPIA -> Color(0xFFE7D3B2)
+            ReaderThemeOption.DARK -> Color(0xFF191919)
+        }
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            bitmap?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = index?.let { page -> "PDF sayfa " + (page + 1) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(2.dp),
+                    contentScale = ContentScale.Fit
+                )
+            }
+
+            if (index != null) {
+                Text(
+                    text = (index + 1).toString(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 5.dp),
+                    color = if (theme == ReaderThemeOption.DARK) {
+                        Color.White.copy(alpha = 0.52f)
+                    } else {
+                        Color.Black.copy(alpha = 0.42f)
+                    },
+                    fontSize = 10.sp
+                )
+            }
         }
     }
 }
