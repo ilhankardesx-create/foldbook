@@ -26,30 +26,33 @@ jobs:
 
           main = Path("app/src/main/java/com/foldbook/app/MainActivity.kt")
           text = main.read_text(encoding="utf-8")
+          lines = text.splitlines()
 
-          old = '''                Text(
-                    text = "Kütüphane",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 25.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )'''
+          idx = next(
+              (i for i, line in enumerate(lines) if line.strip() == 'text = "Kütüphane",'),
+              None
+          )
+          if idx is None or idx < 1 or lines[idx - 1].strip() != "Text(":
+              raise SystemExit("Kütüphane başlığı bulunamadı; dosya değiştirilmedi.")
 
-          new = '''                Text(
-                    text = "Kütüphane",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 22.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    softWrap = false,
-                    color = MaterialTheme.colorScheme.onSurface
-                )'''
+          prop_indent = lines[idx][:len(lines[idx]) - len(lines[idx].lstrip())]
+          if lines[idx + 1].strip() != "modifier = Modifier.weight(1f),":
+              raise SystemExit("Kütüphane başlık düzeni beklenenden farklı.")
 
-          if old not in text:
-              raise SystemExit("Kütüphane başlık bloğu bulunamadı; dosya değiştirilmedi.")
+          lines[idx:idx + 5] = [
+              prop_indent + 'text = "Kütüphane",',
+              prop_indent + 'modifier = Modifier.weight(1f),',
+              prop_indent + 'fontSize = 22.sp,',
+              prop_indent + 'fontFamily = FontFamily.Serif,',
+              prop_indent + 'fontWeight = FontWeight.Bold,',
+              prop_indent + 'maxLines = 1,',
+              prop_indent + 'softWrap = false,',
+              prop_indent + 'color = MaterialTheme.colorScheme.onSurface',
+          ]
 
-          text = text.replace(old, new, 1)
+          text = "\n".join(lines) + "\n"
+          if 'text = "v0.9.17"' not in text:
+              raise SystemExit("Ayarlar ekranındaki v0.9.17 yazısı bulunamadı.")
           text = text.replace('text = "v0.9.17"', 'text = "v0.9.18"', 1)
           main.write_text(text, encoding="utf-8")
 
