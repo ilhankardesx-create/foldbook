@@ -150,6 +150,20 @@ private val LocalReaderPalette = staticCompositionLocalOf {
     )
 }
 
+private val LocalReaderFontSize = staticCompositionLocalOf { ReaderFontSize.MEDIUM }
+
+private fun fontSizeSp(size: ReaderFontSize): Float = when (size) {
+    ReaderFontSize.SMALL -> 16f
+    ReaderFontSize.MEDIUM -> 18f
+    ReaderFontSize.LARGE -> 21f
+}
+
+private fun pageCharLimit(size: ReaderFontSize): Int = when (size) {
+    ReaderFontSize.SMALL -> 730
+    ReaderFontSize.MEDIUM -> 610
+    ReaderFontSize.LARGE -> 500
+}
+
 private fun readerPalette(theme: ReaderThemeOption): ReaderPalette = when (theme) {
     ReaderThemeOption.LIGHT -> ReaderPalette(
         background = Color(0xFFE8DFD0),
@@ -171,9 +185,12 @@ private fun readerPalette(theme: ReaderThemeOption): ReaderPalette = when (theme
     )
 }
 
-private fun EpubBook.toReaderPages(): List<ReaderPage> {
+private fun EpubBook.toReaderPages(fontSize: ReaderFontSize): List<ReaderPage> {
     return chapters.flatMap { chapter ->
-        paginateText(chapter.text).mapIndexed { pageIndex, body ->
+        paginateText(
+            text = chapter.text,
+            maxChars = pageCharLimit(fontSize)
+        ).mapIndexed { pageIndex, body ->
             ReaderPage(
                 chapter = if (pageIndex == 0) chapter.title else "",
                 body = body
@@ -300,7 +317,9 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                     EpubLoader.load(context, Uri.parse(book.uri))
                 }
             }.onSuccess { epub ->
-                val pages = epub.toReaderPages()
+                val pages = epub.toReaderPages(
+                    LibraryStore.readReaderFontSize(context)
+                )
                 if (pages.isEmpty()) {
                     readerError = "Bu EPUB içinde okunabilir metin bulunamadı."
                 } else {
@@ -380,6 +399,15 @@ private fun LibraryScreen(
     onChooseFolder: () -> Unit,
     onBookClick: (LibraryBook) -> Unit
 ) {
+    val context = LocalContext.current
+    var settingsVisible by rememberSaveable { mutableStateOf(false) }
+    var selectedTheme by remember {
+        mutableStateOf(LibraryStore.readReaderTheme(context))
+    }
+    var selectedFontSize by remember {
+        mutableStateOf(LibraryStore.readReaderFontSize(context))
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -424,6 +452,20 @@ private fun LibraryScreen(
                     )
                 }
 
+                Text(
+                    text = "v0.8.2",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Button(
                     onClick = onChooseFolder,
                     enabled = !isLoading
@@ -431,14 +473,86 @@ private fun LibraryScreen(
                     Text(if (isLoading) "Taranıyor…" else "Klasör Seç")
                 }
 
-                Spacer(Modifier.width(10.dp))
+                Button(
+                    onClick = { settingsVisible = !settingsVisible }
+                ) {
+                    Text("Okuma Ayarları")
+                }
+            }
 
-                Text(
-                    text = "v0.8",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            AnimatedVisibility(visible = settingsVisible) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surface
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Tema",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                ReaderThemeOption.LIGHT to "Açık",
+                                ReaderThemeOption.SEPIA to "Sepya",
+                                ReaderThemeOption.DARK to "Koyu"
+                            ).forEach { (option, label) ->
+                                Button(
+                                    onClick = {
+                                        selectedTheme = option
+                                        LibraryStore.saveReaderTheme(context, option)
+                                    }
+                                ) {
+                                    Text(
+                                        if (selectedTheme == option) "✓ $label" else label
+                                    )
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "EPUB yazı boyutu",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                ReaderFontSize.SMALL to "Küçük",
+                                ReaderFontSize.MEDIUM to "Orta",
+                                ReaderFontSize.LARGE to "Büyük"
+                            ).forEach { (option, label) ->
+                                Button(
+                                    onClick = {
+                                        selectedFontSize = option
+                                        LibraryStore.saveReaderFontSize(context, option)
+                                    }
+                                ) {
+                                    Text(
+                                        if (selectedFontSize == option) "✓ $label" else label
+                                    )
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "PDF sabit sayfa düzenini korur; tema PDF'ye de uygulanır.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                        )
+                    }
+                }
             }
 
             error?.let {
@@ -660,14 +774,18 @@ private fun ReaderScreen(
     }
 
     var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
-    var themeName by rememberSaveable(bookKey) {
-        mutableStateOf(LibraryStore.readReaderTheme(context).name)
+    val theme = remember(bookKey) {
+        LibraryStore.readReaderTheme(context)
     }
-    val theme = runCatching { ReaderThemeOption.valueOf(themeName) }
-        .getOrDefault(ReaderThemeOption.LIGHT)
+    val fontSize = remember(bookKey) {
+        LibraryStore.readReaderFontSize(context)
+    }
     val palette = readerPalette(theme)
 
-    CompositionLocalProvider(LocalReaderPalette provides palette) {
+    CompositionLocalProvider(
+        LocalReaderPalette provides palette,
+        LocalReaderFontSize provides fontSize
+    ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = palette.background
@@ -712,26 +830,10 @@ private fun ReaderScreen(
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Button(onClick = onBack) {
                                 Text("Rafa Dön")
-                            }
-
-                            listOf(
-                                ReaderThemeOption.LIGHT to "Açık",
-                                ReaderThemeOption.SEPIA to "Sepya",
-                                ReaderThemeOption.DARK to "Koyu"
-                            ).forEach { (option, label) ->
-                                Button(
-                                    onClick = {
-                                        themeName = option.name
-                                        LibraryStore.saveReaderTheme(context, option)
-                                    }
-                                ) {
-                                    Text(label)
-                                }
                             }
                         }
                     }
@@ -1128,6 +1230,8 @@ private fun BookPage(
     modifier: Modifier = Modifier
 ) {
     val palette = LocalReaderPalette.current
+    val readerFontSize = LocalReaderFontSize.current
+    val bodySize = fontSizeSp(readerFontSize)
 
     Surface(
         modifier = modifier
@@ -1143,8 +1247,8 @@ private fun BookPage(
             if (!page?.chapter.isNullOrBlank()) {
                 Text(
                     text = page?.chapter.orEmpty(),
-                    fontSize = 19.sp,
-                    lineHeight = 24.sp,
+                    fontSize = (bodySize + 1.5f).sp,
+                    lineHeight = (bodySize + 7f).sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Serif,
                     color = palette.text
@@ -1155,8 +1259,8 @@ private fun BookPage(
 
             Text(
                 text = page?.body.orEmpty(),
-                fontSize = 18.sp,
-                lineHeight = 29.sp,
+                fontSize = bodySize.sp,
+                lineHeight = (bodySize + 11f).sp,
                 fontFamily = FontFamily.Serif,
                 color = palette.text.copy(
                     alpha = if (isBackSide) 0.88f else 1f
