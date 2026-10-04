@@ -617,12 +617,24 @@ private fun LibraryScreen(
         LibraryStore.readLastOpened(context)
     }
 
-    val filteredBooks = remember(books, searchQuery) {
-        val query = searchQuery.trim()
-        if (query.isBlank()) {
+    val orderedBooks = remember(books, lastOpenedUri) {
+        val lastOpenedBook = books.firstOrNull { it.uri == lastOpenedUri }
+        if (lastOpenedBook == null) {
             books
         } else {
-            books.filter { book ->
+            buildList {
+                add(lastOpenedBook)
+                addAll(books.filterNot { it.uri == lastOpenedUri })
+            }
+        }
+    }
+
+    val filteredBooks = remember(orderedBooks, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isBlank()) {
+            orderedBooks
+        } else {
+            orderedBooks.filter { book ->
                 book.title.contains(query, ignoreCase = true)
             }
         }
@@ -1224,93 +1236,115 @@ private fun ShelfBook(
     )
     val coverColor = covers[(book.title.hashCode() and Int.MAX_VALUE) % covers.size]
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(0.67f)
-            .shadow(
-                elevation = if (isLastOpened) 10.dp else 6.dp,
-                shape = RoundedCornerShape(5.dp)
-            )
-            .pointerInput(book.uri) {
-                detectTapGestures(
-                    onTap = { onClick() },
-                    onLongPress = { onLongPress() }
-                )
-            },
-        shape = RoundedCornerShape(5.dp),
-        color = coverColor
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            if (coverBitmap != null) {
-                Image(
-                    bitmap = coverBitmap!!.asImageBitmap(),
-                    contentDescription = book.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.67f)
+                .shadow(
+                    elevation = if (isLastOpened) 10.dp else 6.dp,
+                    shape = RoundedCornerShape(5.dp)
                 )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(9.dp)
-                ) {
+                .pointerInput(book.uri) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = { onLongPress() }
+                    )
+                },
+            shape = RoundedCornerShape(5.dp),
+            color = coverColor
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (coverBitmap != null) {
+                    Image(
+                        bitmap = coverBitmap!!.asImageBitmap(),
+                        contentDescription = book.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
                     Box(
                         modifier = Modifier
-                            .fillMaxHeight()
-                            .width(4.dp)
-                            .align(Alignment.CenterStart)
-                            .background(Color.Black.copy(alpha = 0.13f))
-                    )
-
-                    Text(
-                        text = book.title,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(horizontal = 5.dp),
-                        textAlign = TextAlign.Center,
-                        maxLines = 6,
-                        overflow = TextOverflow.Ellipsis,
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        lineHeight = 16.sp,
-                        color = Color(0xFFFFF8EA)
-                    )
-                }
-            }
-
-            if (isLastOpened) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .border(
-                            width = 2.dp,
-                            color = Color(0xFFE7C98A).copy(alpha = 0.92f),
-                            shape = RoundedCornerShape(5.dp)
+                            .fillMaxSize()
+                            .padding(9.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(4.dp)
+                                .align(Alignment.CenterStart)
+                                .background(Color.Black.copy(alpha = 0.13f))
                         )
-                        .zIndex(3f)
-                )
-            }
 
-            if (book.isFavorite) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp),
-                    shape = RoundedCornerShape(50),
-                    color = Color.White.copy(alpha = 0.86f)
-                ) {
-                    Text(
-                        text = "♥",
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        color = Color(0xFFD32F2F),
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold
+                        Text(
+                            text = book.title,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(horizontal = 5.dp),
+                            textAlign = TextAlign.Center,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            lineHeight = 16.sp,
+                            color = Color(0xFFFFF8EA)
+                        )
+                    }
+                }
+
+                if (isLastOpened) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .border(
+                                width = 2.dp,
+                                color = Color(0xFFE7C98A).copy(alpha = 0.92f),
+                                shape = RoundedCornerShape(5.dp)
+                            )
+                            .zIndex(3f)
                     )
                 }
+
+                if (book.isFavorite) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp),
+                        shape = RoundedCornerShape(50),
+                        color = Color.White.copy(alpha = 0.86f)
+                    ) {
+                        Text(
+                            text = "♥",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            color = Color(0xFFD32F2F),
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(22.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isLastOpened) {
+                Text(
+                    text = "Son okunan",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1
+                )
             }
         }
     }
