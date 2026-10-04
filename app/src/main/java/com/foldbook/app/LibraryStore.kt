@@ -27,6 +27,16 @@ data class BookNote(
     val createdAt: Long
 )
 
+data class BookHighlight(
+    val id: String,
+    val bookUri: String,
+    val pageNumber: Int,
+    val startOffset: Int,
+    val endOffset: Int,
+    val text: String,
+    val createdAt: Long
+)
+
 object LibraryStore {
     private const val PREFS = "foldbook_library"
     private const val KEY_FOLDER_URI = "book_folder_uri"
@@ -39,6 +49,7 @@ object LibraryStore {
     private const val KEY_ACTIVE_BOOK_FORMAT = "active_book_format"
     private const val KEY_FAVORITES = "favorite_book_uris"
     private const val KEY_NOTES_JSON = "book_notes_json"
+    private const val KEY_HIGHLIGHTS_JSON = "book_highlights_json"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -268,6 +279,10 @@ object LibraryStore {
             setFavorite(context, newUri, true)
         }
 
+        if (newUri != oldUri) {
+            migrateHighlights(context, oldUri, newUri)
+        }
+
         return newUri
     }
 
@@ -304,6 +319,7 @@ object LibraryStore {
         }
 
         setFavorite(context, book.uri, false)
+        deleteHighlightsForBook(context, book.uri)
 
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val editor = prefs.edit()
@@ -406,6 +422,134 @@ object LibraryStore {
             .edit()
             .putString(KEY_NOTES_JSON, array.toString())
             .apply()
+    }
+
+    fun addHighlight(
+        context: Context,
+        bookUri: String,
+        pageNumber: Int,
+        startOffset: Int,
+        endOffset: Int,
+        text: String
+    ) {
+        val cleanText = text.trim()
+        if (cleanText.isBlank() || endOffset <= startOffset) return
+
+        val highlights = readAllHighlights(context).toMutableList()
+        val duplicate = highlights.any {
+            it.bookUri == bookUri &&
+                it.pageNumber == pageNumber &&
+                it.startOffset == startOffset &&
+                it.endOffset == endOffset &&
+                it.text == cleanText
+        }
+        if (duplicate) return
+
+        val now = System.currentTimeMillis()
+        highlights.add(
+            BookHighlight(
+                id = now.toString() + "-" + cleanText.hashCode().toString(),
+                bookUri = bookUri,
+                pageNumber = pageNumber.coerceAtLeast(1),
+                startOffset = startOffset.coerceAtLeast(0),
+                endOffset = endOffset.coerceAtLeast(startOffset + 1),
+                text = cleanText,
+                createdAt = now
+            )
+        )
+        saveHighlights(context, highlights)
+    }
+
+    fun readHighlights(
+        context: Context,
+        bookUri: String
+    ): List<BookHighlight> {
+        return readAllHighlights(context)
+            .filter { it.bookUri == bookUri }
+            .sortedBy { it.createdAt }
+    }
+
+    private fun readAllHighlights(context: Context): List<BookHighlight> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_HIGHLIGHTS_JSON, "[]")
+            .orEmpty()
+
+        return runCatching {
+            val array = JSONArray(raw.ifBlank { "[]" })
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val text = item.optString("text").trim()
+                    val start = item.optInt("startOffset", -1)
+                    val end = item.optInt("endOffset", -1)
+                    if (text.isBlank() || start < 0 || end <= start) continue
+
+                    add(
+                        BookHighlight(
+                            id = item.optString("id").ifBlank {
+                                item.optLong("createdAt").toString() + "-" + index
+                            },
+                            bookUri = item.optString("bookUri"),
+                            pageNumber = item.optInt("pageNumber", 1).coerceAtLeast(1),
+                            startOffset = start,
+                            endOffset = end,
+                            text = text,
+                            createdAt = item.optLong("createdAt", 0L)
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveHighlights(
+        context: Context,
+        highlights: List<BookHighlight>
+    ) {
+        val array = JSONArray()
+        highlights.forEach { highlight ->
+            array.put(
+                JSONObject()
+                    .put("id", highlight.id)
+                    .put("bookUri", highlight.bookUri)
+                    .put("pageNumber", highlight.pageNumber)
+                    .put("startOffset", highlight.startOffset)
+                    .put("endOffset", highlight.endOffset)
+                    .put("text", highlight.text)
+                    .put("createdAt", highlight.createdAt)
+            )
+        }
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_HIGHLIGHTS_JSON, array.toString())
+            .apply()
+    }
+
+    private fun migrateHighlights(
+        context: Context,
+        oldUri: String,
+        newUri: String
+    ) {
+        if (oldUri == newUri) return
+        val updated = readAllHighlights(context).map { highlight ->
+            if (highlight.bookUri == oldUri) {
+                highlight.copy(bookUri = newUri)
+            } else {
+                highlight
+            }
+        }
+        saveHighlights(context, updated)
+    }
+
+    private fun deleteHighlightsForBook(
+        context: Context,
+        bookUri: String
+    ) {
+        saveHighlights(
+            context,
+            readAllHighlights(context).filterNot { it.bookUri == bookUri }
+        )
     }
 
     fun scanFolder(context: Context, treeUri: Uri): List<LibraryBook> {
