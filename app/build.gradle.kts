@@ -6,14 +6,14 @@ plugins {
 
 android {
     namespace = "com.foldbook.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.foldbook.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        targetSdk = 36
+        versionCode = 8
+        versionName = "0.8.0"
     }
 
     compileOptions {
