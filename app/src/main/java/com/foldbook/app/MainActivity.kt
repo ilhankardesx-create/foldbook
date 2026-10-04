@@ -246,14 +246,14 @@ private fun EpubBook.toReaderPages(
         pageWidthPx - (64f * density)
     ).toInt().coerceAtLeast(120)
 
-    // Compose ile StaticLayout arasındaki küçük font ölçüm farklarında
-    // son satırın kesilmemesi için yaklaşık iki satırlık güvenli alan.
-    val bottomSafetyPx = (bodyLineHeightPx * 1.85f).toInt()
+    // StaticLayout satır altlarını gerçek piksel yüksekliğiyle ölçüyor.
+    // Yalnızca küçük Compose/StaticLayout farkı için ince bir güvenlik payı bırakıyoruz.
+    val bottomSafetyPx = (bodyLineHeightPx * 0.35f).toInt()
 
     val contentHeightPx = (
         pageHeightPx -
             (44f * density) -      // üst + alt sayfa iç boşluğu
-            (30f * density) -      // sayfa numarası alanı
+            (24f * density) -      // gerçek sayfa numarası alanı
             bottomSafetyPx         // yarım satır görünmesini engelleyen güvenli alan
     ).toInt().coerceAtLeast((bodyLineHeightPx * 4f).toInt())
 
@@ -941,7 +941,7 @@ private fun LibraryScreen(
                 Text(
                     text = "Kütüphane",
                     modifier = Modifier.weight(1f),
-                    fontSize = 22.sp,
+                    fontSize = 19.sp,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -1098,7 +1098,7 @@ private fun LibraryScreen(
                             )
 
                             Text(
-                                text = "v0.9.18",
+                                text = "v0.9.19",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                             )
