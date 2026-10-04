@@ -44,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -55,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -131,6 +133,43 @@ private data class ReaderPage(
     val chapter: String,
     val body: String
 )
+
+private data class ReaderPalette(
+    val background: Color,
+    val page: Color,
+    val pageBack: Color,
+    val text: Color
+)
+
+private val LocalReaderPalette = staticCompositionLocalOf {
+    ReaderPalette(
+        background = Color(0xFFE8DFD0),
+        page = Color(0xFFFFFCF5),
+        pageBack = Color(0xFFFFF7E8),
+        text = Color(0xFF2E2923)
+    )
+}
+
+private fun readerPalette(theme: ReaderThemeOption): ReaderPalette = when (theme) {
+    ReaderThemeOption.LIGHT -> ReaderPalette(
+        background = Color(0xFFE8DFD0),
+        page = Color(0xFFFFFCF5),
+        pageBack = Color(0xFFFFF7E8),
+        text = Color(0xFF2E2923)
+    )
+    ReaderThemeOption.SEPIA -> ReaderPalette(
+        background = Color(0xFFC9B38E),
+        page = Color(0xFFF2DFC0),
+        pageBack = Color(0xFFEAD4B1),
+        text = Color(0xFF433523)
+    )
+    ReaderThemeOption.DARK -> ReaderPalette(
+        background = Color(0xFF111111),
+        page = Color(0xFF232323),
+        pageBack = Color(0xFF1D1D1D),
+        text = Color(0xFFE7E2D8)
+    )
+}
 
 private fun EpubBook.toReaderPages(): List<ReaderPage> {
     return chapters.flatMap { chapter ->
@@ -618,31 +657,84 @@ private fun ReaderScreen(
         )
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 4.dp, vertical = 4.dp)
-        ) {
-            val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
+    var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
+    var themeName by rememberSaveable(bookKey) {
+        mutableStateOf(LibraryStore.readReaderTheme(context).name)
+    }
+    val theme = runCatching { ReaderThemeOption.valueOf(themeName) }
+        .getOrDefault(ReaderThemeOption.LIGHT)
+    val palette = readerPalette(theme)
 
-            BookSpread(
-                pages = pages,
-                bookKey = bookKey,
-                initialPageIndex = savedPage,
-                onPageChanged = { pageIndex ->
-                    LibraryStore.saveProgress(
-                        context = context,
-                        bookUri = bookKey,
-                        pageIndex = pageIndex
-                    )
-                },
-                twoPage = twoPage,
-                modifier = Modifier.fillMaxSize()
-            )
+    CompositionLocalProvider(LocalReaderPalette provides palette) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = palette.background
+        ) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                    .pointerInput(bookKey) {
+                        detectTapGestures {
+                            controlsVisible = !controlsVisible
+                        }
+                    }
+            ) {
+                val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
+
+                BookSpread(
+                    pages = pages,
+                    bookKey = bookKey,
+                    initialPageIndex = savedPage,
+                    onPageChanged = { pageIndex ->
+                        LibraryStore.saveProgress(
+                            context = context,
+                            bookUri = bookKey,
+                            pageIndex = pageIndex
+                        )
+                    },
+                    twoPage = twoPage,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                AnimatedVisibility(
+                    visible = controlsVisible,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 14.dp)
+                        .zIndex(20f)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = Color.Black.copy(alpha = 0.72f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(onClick = onBack) {
+                                Text("Rafa Dön")
+                            }
+
+                            listOf(
+                                ReaderThemeOption.LIGHT to "Açık",
+                                ReaderThemeOption.SEPIA to "Sepya",
+                                ReaderThemeOption.DARK to "Koyu"
+                            ).forEach { (option, label) ->
+                                Button(
+                                    onClick = {
+                                        themeName = option.name
+                                        LibraryStore.saveReaderTheme(context, option)
+                                    }
+                                ) {
+                                    Text(label)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1033,11 +1125,13 @@ private fun BookPage(
     isBackSide: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val palette = LocalReaderPalette.current
+
     Surface(
         modifier = modifier
             .shadow(7.dp, RoundedCornerShape(10.dp))
             .clip(RoundedCornerShape(10.dp)),
-        color = if (isBackSide) Color(0xFFFFF7E8) else Color(0xFFFFFCF5)
+        color = if (isBackSide) palette.pageBack else palette.page
     ) {
         Column(
             modifier = Modifier
@@ -1051,7 +1145,7 @@ private fun BookPage(
                     lineHeight = 24.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Serif,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = palette.text
                 )
 
                 Spacer(Modifier.size(16.dp))
@@ -1062,7 +1156,7 @@ private fun BookPage(
                 fontSize = 18.sp,
                 lineHeight = 29.sp,
                 fontFamily = FontFamily.Serif,
-                color = MaterialTheme.colorScheme.onSurface.copy(
+                color = palette.text.copy(
                     alpha = if (isBackSide) 0.88f else 1f
                 )
             )
@@ -1074,7 +1168,7 @@ private fun BookPage(
                     text = pageNumber.toString(),
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
+                    color = palette.text.copy(alpha = 0.50f)
                 )
             }
         }
