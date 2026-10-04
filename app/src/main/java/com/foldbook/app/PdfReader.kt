@@ -2,6 +2,10 @@ package com.foldbook.app
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -64,21 +68,73 @@ private class PdfBookDocument(
         get() = renderer.pageCount
 
     @Synchronized
-    fun renderPage(index: Int, targetWidth: Int): Bitmap {
+    fun renderPage(
+        index: Int,
+        targetWidth: Int,
+        theme: ReaderThemeOption = ReaderThemeOption.LIGHT
+    ): Bitmap {
         val safeIndex = index.coerceIn(0, pageCount - 1)
         renderer.openPage(safeIndex).use { page ->
             val width = targetWidth.coerceAtLeast(600)
             val ratio = page.height.toFloat() / page.width.toFloat()
             val height = (width * ratio).toInt().coerceAtLeast(1)
-            return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
-                bitmap.eraseColor(android.graphics.Color.WHITE)
+            val bitmap = Bitmap.createBitmap(
+                width,
+                height,
+                Bitmap.Config.ARGB_8888
+            ).also { rendered ->
+                rendered.eraseColor(android.graphics.Color.WHITE)
                 page.render(
-                    bitmap,
+                    rendered,
                     null,
                     null,
                     PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
                 )
             }
+
+            return applyTheme(bitmap, theme)
+        }
+    }
+
+    private fun applyTheme(
+        source: Bitmap,
+        theme: ReaderThemeOption
+    ): Bitmap {
+        when (theme) {
+            ReaderThemeOption.LIGHT -> return source
+
+            ReaderThemeOption.SEPIA -> {
+                Canvas(source).drawColor(
+                    android.graphics.Color.argb(34, 214, 168, 96)
+                )
+                return source
+            }
+
+            ReaderThemeOption.DARK -> {
+                val output = Bitmap.createBitmap(
+                    source.width,
+                    source.height,
+                    Bitmap.Config.ARGB_8888
+                )
+
+                val matrix = ColorMatrix(
+                    floatArrayOf(
+                        -1f, 0f, 0f, 0f, 255f,
+                        0f, -1f, 0f, 0f, 255f,
+                        0f, 0f, -1f, 0f, 255f,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+
+                val paint = Paint().apply {
+                    colorFilter = ColorMatrixColorFilter(matrix)
+                }
+
+                Canvas(output).drawBitmap(source, 0f, 0f, paint)
+                source.recycle()
+                return output
+            }
+        }
         }
     }
 
@@ -122,10 +178,18 @@ fun PdfReaderScreen(
     }
 
     var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
+    val theme = remember(bookKey) {
+        LibraryStore.readReaderTheme(context)
+    }
+    val backgroundColor = when (theme) {
+        ReaderThemeOption.LIGHT -> Color(0xFFE8DFD0)
+        ReaderThemeOption.SEPIA -> Color(0xFFC9B38E)
+        ReaderThemeOption.DARK -> Color(0xFF111111)
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF171717)
+        color = backgroundColor
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -144,6 +208,7 @@ fun PdfReaderScreen(
                 bookKey = bookKey,
                 initialPage = initialPage,
                 twoPage = twoPage,
+                theme = theme,
                 onPageChanged = { page ->
                     LibraryStore.saveProgress(
                         context = context,
@@ -173,11 +238,7 @@ fun PdfReaderScreen(
                             Text("Rafa Dön")
                         }
 
-                        Text(
-                            text = "PDF",
-                            color = Color.White,
-                            fontSize = 13.sp
-                        )
+
                     }
                 }
             }
@@ -191,6 +252,7 @@ private fun PdfSpread(
     bookKey: String,
     initialPage: Int,
     twoPage: Boolean,
+    theme: ReaderThemeOption,
     onPageChanged: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -292,6 +354,7 @@ private fun PdfSpread(
                 PdfPage(
                     document = document,
                     index = pageIndex,
+                    theme = theme,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
@@ -308,6 +371,7 @@ private fun PdfSpread(
                 PdfPage(
                     document = document,
                     index = (pageIndex + 1).takeIf { it < document.pageCount },
+                    theme = theme,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
@@ -331,6 +395,7 @@ private fun PdfSpread(
             PdfPage(
                 document = document,
                 index = targetIndex,
+                theme = theme,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -360,6 +425,7 @@ private fun PdfSpread(
 private fun PdfPage(
     document: PdfBookDocument,
     index: Int?,
+    theme: ReaderThemeOption,
     modifier: Modifier = Modifier
 ) {
     if (index == null || index !in 0 until document.pageCount) {
@@ -370,10 +436,11 @@ private fun PdfPage(
     val bitmap by produceState<Bitmap?>(
         initialValue = null,
         key1 = document,
-        key2 = index
+        key2 = index,
+        key3 = theme
     ) {
         value = withContext(Dispatchers.IO) {
-            document.renderPage(index, 1400)
+            document.renderPage(index, 1400, theme)
         }
     }
 
@@ -381,7 +448,11 @@ private fun PdfPage(
         modifier = modifier
             .shadow(7.dp, RoundedCornerShape(8.dp))
             .clip(RoundedCornerShape(8.dp)),
-        color = Color.White
+        color = when (theme) {
+            ReaderThemeOption.LIGHT -> Color.White
+            ReaderThemeOption.SEPIA -> Color(0xFFF2DFC0)
+            ReaderThemeOption.DARK -> Color(0xFF202020)
+        }
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -401,7 +472,11 @@ private fun PdfPage(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 8.dp),
-                color = Color.Black.copy(alpha = 0.45f),
+                color = if (theme == ReaderThemeOption.DARK) {
+                    Color.White.copy(alpha = 0.55f)
+                } else {
+                    Color.Black.copy(alpha = 0.45f)
+                },
                 fontSize = 11.sp
             )
         }
