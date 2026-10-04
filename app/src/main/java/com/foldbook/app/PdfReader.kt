@@ -57,6 +57,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -76,7 +77,7 @@ private class PdfBookDocument(
             ?: error("PDF açılamadı.")
     private val renderer = PdfRenderer(descriptor)
 
-    private val pageCache = object : LruCache<String, Bitmap>(64 * 1024) {
+    private val pageCache = object : LruCache<String, Bitmap>(96 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int {
             return (value.byteCount / 1024).coerceAtLeast(1)
         }
@@ -408,12 +409,53 @@ private fun PdfSpread(
     val scope = rememberCoroutineScope()
     val step = if (twoPage) 2 else 1
     val progress = if (settling) settleAnimation.value else dragProgress
-    val renderWidthPx = (pageWidthPx * 1.45f).toInt().coerceIn(900, 2400)
+    val densityInfo = LocalDensity.current
+    val spineWidthPx = with(densityInfo) { 8.dp.toPx() }
+    val renderScale = if (twoPage) 1.45f else 1.15f
+    val renderWidthPx = (pageWidthPx * renderScale).toInt().coerceIn(820, 2200)
 
     fun canTurn(direction: Int): Boolean = when (direction) {
         1 -> pageIndex + step < document.pageCount
         -1 -> pageIndex - step >= 0
         else -> false
+    }
+
+    var warmingDirection by remember { mutableIntStateOf(0) }
+
+    fun turnAssetIndices(direction: Int): List<Int> {
+        return if (twoPage) {
+            when (direction) {
+                1 -> listOf(pageIndex, pageIndex + 1, pageIndex + 2, pageIndex + 3)
+                -1 -> listOf(pageIndex - 2, pageIndex - 1, pageIndex, pageIndex + 1)
+                else -> emptyList()
+            }
+        } else {
+            when (direction) {
+                1 -> listOf(pageIndex, pageIndex + 1)
+                -1 -> listOf(pageIndex - 1, pageIndex)
+                else -> emptyList()
+            }
+        }.filter { it in 0 until document.pageCount }
+    }
+
+    fun turnAssetsReady(direction: Int): Boolean {
+        if (!canTurn(direction)) return false
+        return turnAssetIndices(direction).all {
+            document.cachedPage(it, renderWidthPx, theme) != null
+        }
+    }
+
+    fun warmTurnAssets(direction: Int) {
+        if (!canTurn(direction) || warmingDirection == direction) return
+        warmingDirection = direction
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                turnAssetIndices(direction).forEach {
+                    document.renderPage(it, renderWidthPx, theme)
+                }
+            }
+            if (warmingDirection == direction) warmingDirection = 0
+        }
     }
 
     fun settleTurn(cancelOnly: Boolean = false) {
@@ -480,18 +522,18 @@ private fun PdfSpread(
         withContext(Dispatchers.IO) {
             val candidates = if (twoPage) {
                 listOf(
-                    pageIndex - 2,
-                    pageIndex - 1,
-                    pageIndex,
-                    pageIndex + 1,
                     pageIndex + 2,
-                    pageIndex + 3
+                    pageIndex + 3,
+                    pageIndex - 1,
+                    pageIndex - 2,
+                    pageIndex,
+                    pageIndex + 1
                 )
             } else {
                 listOf(
-                    pageIndex,
                     pageIndex + 1,
                     pageIndex - 1,
+                    pageIndex,
                     pageIndex + 2,
                     pageIndex - 2
                 )
@@ -509,7 +551,7 @@ private fun PdfSpread(
     val gestureModifier = Modifier
         .onSizeChanged {
             pageWidthPx = if (twoPage) {
-                ((it.width - 10f) / 2f).coerceAtLeast(1f)
+                ((it.width - spineWidthPx) / 2f).coerceAtLeast(1f)
             } else {
                 it.width.toFloat().coerceAtLeast(1f)
             }
@@ -535,18 +577,35 @@ private fun PdfSpread(
                         else -> 0
                     }
 
-                    if (direction == 0 || canTurn(direction)) {
-                        dragPx = proposed
-                        turnDirection = direction
-                        dragProgress =
-                            (abs(dragPx) / pageWidthPx).coerceIn(0f, 1f)
-                    } else {
-                        dragPx = proposed.coerceIn(
-                            -pageWidthPx * 0.055f,
-                            pageWidthPx * 0.055f
-                        )
-                        dragProgress = 0f
-                        turnDirection = 0
+                    when {
+                        direction == 0 -> {
+                            dragPx = 0f
+                            dragProgress = 0f
+                            turnDirection = 0
+                        }
+
+                        canTurn(direction) && turnAssetsReady(direction) -> {
+                            dragPx = proposed
+                            turnDirection = direction
+                            dragProgress =
+                                (abs(dragPx) / pageWidthPx).coerceIn(0f, 1f)
+                        }
+
+                        canTurn(direction) -> {
+                            warmTurnAssets(direction)
+                            dragPx = 0f
+                            dragProgress = 0f
+                            turnDirection = 0
+                        }
+
+                        else -> {
+                            dragPx = proposed.coerceIn(
+                                -pageWidthPx * 0.055f,
+                                pageWidthPx * 0.055f
+                            )
+                            dragProgress = 0f
+                            turnDirection = 0
+                        }
                     }
                 },
                 onDragEnd = { settleTurn() },
@@ -657,6 +716,7 @@ private fun PdfTwoPageSpread(
                     direction = -1,
                     theme = theme,
                     renderWidthPx = renderWidthPx,
+                    crossSpine = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -696,6 +756,7 @@ private fun PdfTwoPageSpread(
                     direction = 1,
                     theme = theme,
                     renderWidthPx = renderWidthPx,
+                    crossSpine = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -734,20 +795,65 @@ private fun PdfSinglePageSpread(
         )
 
         if (turnDirection != 0) {
-            PdfTurningPage(
+            PdfSingleTurningPage(
                 document = document,
                 frontIndex = pageIndex,
-                backIndex = targetIndex,
                 progress = progress,
                 direction = turnDirection,
                 theme = theme,
                 renderWidthPx = renderWidthPx,
-                cameraDistanceValue = 70f,
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(4f)
             )
         }
+    }
+}
+
+@Composable
+private fun PdfSingleTurningPage(
+    document: PdfBookDocument,
+    frontIndex: Int,
+    progress: Float,
+    direction: Int,
+    theme: ReaderThemeOption,
+    renderWidthPx: Int,
+    modifier: Modifier = Modifier
+) {
+    val p = progress.coerceIn(0f, 1f)
+    val rotation = if (direction == 1) -88f * p else 88f * p
+    val origin = if (direction == 1) {
+        TransformOrigin(0f, 0.5f)
+    } else {
+        TransformOrigin(1f, 0.5f)
+    }
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            transformOrigin = origin
+            rotationY = rotation
+            cameraDistance = 48f
+            shadowElevation = 18f * p
+            scaleY = 1f - (0.008f * p)
+        }
+    ) {
+        PdfPage(
+            document = document,
+            index = frontIndex,
+            theme = theme,
+            renderWidthPx = renderWidthPx,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        Box(
+            modifier = Modifier
+                .align(
+                    if (direction == 1) Alignment.CenterEnd else Alignment.CenterStart
+                )
+                .width(18.dp)
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.16f * p))
+        )
     }
 }
 
@@ -761,6 +867,7 @@ private fun PdfTurningPage(
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     cameraDistanceValue: Float = 30f,
+    crossSpine: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val p = progress.coerceIn(0f, 1f)
@@ -771,12 +878,22 @@ private fun PdfTurningPage(
     } else {
         TransformOrigin(1f, 0.5f)
     }
+    val spineShiftPx = if (crossSpine) {
+        with(LocalDensity.current) { 8.dp.toPx() } * p
+    } else {
+        0f
+    }
 
     Box(
         modifier = modifier.graphicsLayer {
             transformOrigin = origin
             rotationY = rotation
             cameraDistance = cameraDistanceValue
+            translationX = when {
+                !crossSpine -> 0f
+                direction == 1 -> -spineShiftPx
+                else -> spineShiftPx
+            }
             shadowElevation = 20f * (1f - abs(0.5f - p) * 2f)
             scaleY = 1f - (0.012f * (1f - abs(0.5f - p) * 2f))
         }
