@@ -2183,14 +2183,14 @@ private fun TurningPage(
                 BookPage(
                     page = backPage,
                     pageNumber = backNumber,
-                    isBackSide = true,
+                    isBackSide = false,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
                 BookPage(
                     page = frontPage,
                     pageNumber = frontNumber,
-                    isBackSide = showingBack,
+                    isBackSide = false,
                     modifier = Modifier.fillMaxSize()
                 )
             }
