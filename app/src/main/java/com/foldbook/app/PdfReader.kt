@@ -285,9 +285,12 @@ fun PdfReaderScreen(
     }
 
     var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
-    val theme = remember(bookKey) {
-        LibraryStore.readReaderTheme(context)
+    var themeName by rememberSaveable(bookKey) {
+        mutableStateOf(LibraryStore.readReaderTheme(context).name)
     }
+    val theme = runCatching {
+        ReaderThemeOption.valueOf(themeName)
+    }.getOrDefault(ReaderThemeOption.LIGHT)
     val backgroundColor = when (theme) {
         ReaderThemeOption.LIGHT -> Color(0xFFE8DFD0)
         ReaderThemeOption.SEPIA -> Color(0xFFC9B38E)
@@ -337,11 +340,29 @@ fun PdfReaderScreen(
                     shape = RoundedCornerShape(18.dp),
                     color = Color.Black.copy(alpha = 0.72f)
                 ) {
-                    Button(
-                        onClick = onBack,
-                        modifier = Modifier.padding(6.dp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Rafa Dön")
+                        Button(onClick = onBack) {
+                            Text("Rafa Dön")
+                        }
+
+                        listOf(
+                            ReaderThemeOption.LIGHT to "Açık",
+                            ReaderThemeOption.SEPIA to "Sepya",
+                            ReaderThemeOption.DARK to "Koyu"
+                        ).forEach { (option, label) ->
+                            Button(
+                                onClick = {
+                                    themeName = option.name
+                                    LibraryStore.saveReaderTheme(context, option)
+                                }
+                            ) {
+                                Text(label)
+                            }
+                        }
                     }
                 }
             }
