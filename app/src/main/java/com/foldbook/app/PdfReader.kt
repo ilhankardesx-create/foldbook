@@ -43,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -437,15 +438,24 @@ private fun PdfSpread(
                     pageIndex + if (direction == 1) step else -step
                 ).coerceIn(0, document.pageCount - 1)
 
-                pageIndex = newIndex
+                Snapshot.withMutableSnapshot {
+                    pageIndex = newIndex
+                    dragPx = 0f
+                    dragProgress = 0f
+                    turnDirection = 0
+                    settling = false
+                }
                 onPageChanged(newIndex)
+            } else {
+                Snapshot.withMutableSnapshot {
+                    dragPx = 0f
+                    dragProgress = 0f
+                    turnDirection = 0
+                    settling = false
+                }
             }
 
-            dragPx = 0f
-            dragProgress = 0f
-            turnDirection = 0
             settleAnimation.snapTo(0f)
-            settling = false
         }
     }
 
