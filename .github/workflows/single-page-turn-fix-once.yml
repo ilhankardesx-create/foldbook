@@ -1,0 +1,145 @@
+name: FoldBook Single Page Turn Fix
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fix single page turns
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          pdf = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          p = pdf.read_text()
+
+          old = 'private val pageCache = object : LruCache<String, Bitmap>(32 * 1024) {'
+          new = 'private val pageCache = object : LruCache<String, Bitmap>(64 * 1024) {'
+          if old not in p:
+              raise SystemExit('PDF cache size anchor missing')
+          p = p.replace(old, new, 1)
+
+          anchor = '''    val pageCount: Int\n        get() = renderer.pageCount\n\n    @Synchronized\n    fun renderPage('''
+          insert = '''    val pageCount: Int\n        get() = renderer.pageCount\n\n    @Synchronized\n    fun cachedPage(\n        index: Int,\n        targetWidth: Int,\n        theme: ReaderThemeOption = ReaderThemeOption.LIGHT\n    ): Bitmap? {\n        if (pageCount <= 0) return null\n        val safeIndex = index.coerceIn(0, pageCount - 1)\n        val renderWidth = ((targetWidth.coerceIn(720, 2400) / 64) * 64)\n            .coerceAtLeast(720)\n        return pageCache.get("$safeIndex:$renderWidth:${theme.name}")\n    }\n\n    @Synchronized\n    fun renderPage('''
+          if anchor not in p:
+              raise SystemExit('PDF cachedPage anchor missing')
+          p = p.replace(anchor, insert, 1)
+
+          old = '''            } else {\n                listOf(\n                    pageIndex - 1,\n                    pageIndex,\n                    pageIndex + 1\n                )\n            }'''
+          new = '''            } else {\n                listOf(\n                    pageIndex,\n                    pageIndex + 1,\n                    pageIndex - 1,\n                    pageIndex + 2,\n                    pageIndex - 2\n                )\n            }'''
+          if old not in p:
+              raise SystemExit('PDF prefetch anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '''                frontIndex = pageIndex,\n                backIndex = null,\n                progress = progress,\n                direction = turnDirection,\n                theme = theme,\n                renderWidthPx = renderWidthPx,'''
+          new = '''                frontIndex = pageIndex,\n                backIndex = targetIndex,\n                progress = progress,\n                direction = turnDirection,\n                theme = theme,\n                renderWidthPx = renderWidthPx,\n                cameraDistanceValue = 70f,'''
+          if old not in p:
+              raise SystemExit('PDF single page back anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '''    theme: ReaderThemeOption,\n    renderWidthPx: Int,\n    modifier: Modifier = Modifier\n) {'''
+          new = '''    theme: ReaderThemeOption,\n    renderWidthPx: Int,\n    cameraDistanceValue: Float = 30f,\n    modifier: Modifier = Modifier\n) {'''
+          if old not in p:
+              raise SystemExit('PDF turning signature anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '            cameraDistance = 30f\n            shadowElevation = 20f'
+          new = '            cameraDistance = cameraDistanceValue\n            shadowElevation = 20f'
+          if old not in p:
+              raise SystemExit('PDF camera distance anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '''    val bitmap by produceState<Bitmap?>(\n        initialValue = null,\n        key1 = document,'''
+          new = '''    val bitmap by produceState<Bitmap?>(\n        initialValue = document.cachedPage(index, renderWidthPx, theme),\n        key1 = document,'''
+          if old not in p:
+              raise SystemExit('PDF initial cache anchor missing')
+          p = p.replace(old, new, 1)
+
+          pdf.write_text(p)
+
+          main = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          m = main.read_text()
+
+          old = '''                frontPage = pages.getOrNull(pageIndex),\n                frontNumber = pageIndex + 1,\n                backPage = null,\n                backNumber = 0,\n                progress = progress,\n                direction = turnDirection,\n                curlY = curlY,'''
+          new = '''                frontPage = pages.getOrNull(pageIndex),\n                frontNumber = pageIndex + 1,\n                backPage = pages.getOrNull(targetIndex),\n                backNumber = targetIndex + 1,\n                progress = progress,\n                direction = turnDirection,\n                curlY = curlY,\n                cameraDistanceValue = 70f,'''
+          if old not in m:
+              raise SystemExit('EPUB single page back anchor missing')
+          m = m.replace(old, new, 1)
+
+          old = '''    direction: Int,\n    curlY: Float,\n    crossSpine: Boolean = false,\n    modifier: Modifier = Modifier\n) {'''
+          new = '''    direction: Int,\n    curlY: Float,\n    crossSpine: Boolean = false,\n    cameraDistanceValue: Float = 30f,\n    modifier: Modifier = Modifier\n) {'''
+          if old not in m:
+              raise SystemExit('EPUB turning signature anchor missing')
+          m = m.replace(old, new, 1)
+
+          old = '            cameraDistance = 30f\n            shadowElevation = 18f'
+          new = '            cameraDistance = cameraDistanceValue\n            shadowElevation = 18f'
+          if old not in m:
+              raise SystemExit('EPUB camera distance anchor missing')
+          m = m.replace(old, new, 1)
+
+          m = m.replace('text = "v0.9.20"', 'text = "v0.9.21"')
+          main.write_text(m)
+
+          gradle = Path('app/build.gradle.kts')
+          g = gradle.read_text()
+          if 'versionCode = 31' not in g or 'versionName = "0.9.20"' not in g:
+              raise SystemExit('Version anchor missing')
+          g = g.replace('versionCode = 31', 'versionCode = 32', 1)
+          g = g.replace('versionName = "0.9.20"', 'versionName = "0.9.21"', 1)
+          gradle.write_text(g)
+          PY
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: yes | sdkmanager 'platforms;android-36' 'build-tools;36.0.0' || true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build debug APK and release AAB
+        run: gradle :app:assembleDebug :app:bundleRelease --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldbook-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldbook-release-aab
+          path: app/build/outputs/bundle/release/app-release.aab
+
+      - name: Commit source update and remove helper workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/single-page-turn-fix-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/foldbook/app/PdfReader.kt app/src/main/java/com/foldbook/app/MainActivity.kt app/build.gradle.kts .github/workflows/single-page-turn-fix-once.yml
+          git commit -m 'Fix single page turn rendering' || exit 0
+          git push
