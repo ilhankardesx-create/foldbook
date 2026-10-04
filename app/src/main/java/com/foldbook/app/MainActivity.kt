@@ -453,7 +453,7 @@ private fun LibraryScreen(
                 }
 
                 Text(
-                    text = "v0.8.2",
+                    text = "v0.9.0",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
