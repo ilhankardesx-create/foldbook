@@ -2054,6 +2054,7 @@ private fun TwoPageSpread(
                     progress = progress,
                     direction = -1,
                     curlY = curlY,
+                    crossSpine = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -2092,6 +2093,7 @@ private fun TwoPageSpread(
                     progress = progress,
                     direction = 1,
                     curlY = curlY,
+                    crossSpine = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -2152,11 +2154,17 @@ private fun TurningPage(
     progress: Float,
     direction: Int,
     curlY: Float,
+    crossSpine: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val p = progress.coerceIn(0f, 1f)
     val showingBack = p > 0.5f
     val rotation = if (direction == 1) -180f * p else 180f * p
+    val spineShiftPx = if (crossSpine) {
+        with(LocalDensity.current) { 10.dp.toPx() } * p
+    } else {
+        0f
+    }
     val origin = if (direction == 1) {
         TransformOrigin(0f, 0.5f)
     } else {
@@ -2167,6 +2175,11 @@ private fun TurningPage(
         modifier = modifier.graphicsLayer {
             transformOrigin = origin
             rotationY = rotation
+            translationX = when {
+                !crossSpine -> 0f
+                direction == 1 -> -spineShiftPx
+                else -> spineShiftPx
+            }
             cameraDistance = 30f
             shadowElevation = 18f * (1f - abs(0.5f - p) * 2f)
             scaleY = 1f
