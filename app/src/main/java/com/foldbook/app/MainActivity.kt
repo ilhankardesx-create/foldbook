@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.net.Uri
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -97,6 +99,7 @@ import androidx.window.layout.WindowLayoutInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
@@ -638,7 +641,7 @@ private fun LibraryScreen(
                     Spacer(Modifier.height(4.dp))
 
                     Text(
-                        text = "v0.9.5",
+                        text = "v0.9.6",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
@@ -958,6 +961,7 @@ private fun ReaderScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val activity = context as ComponentActivity
     val densityInfo = LocalDensity.current
 
     var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
@@ -971,6 +975,86 @@ private fun ReaderScreen(
         LibraryStore.readReaderFontSize(context)
     }
     val palette = readerPalette(theme)
+
+    var ttsReady by remember { mutableStateOf(false) }
+    var ttsActive by rememberSaveable(bookKey) { mutableStateOf(false) }
+    var ttsPaused by rememberSaveable(bookKey) { mutableStateOf(false) }
+    var ttsRate by rememberSaveable(bookKey) { mutableFloatStateOf(1.0f) }
+    var ttsMessage by remember { mutableStateOf<String?>(null) }
+
+    var currentSpreadIndex by rememberSaveable(bookKey) { mutableIntStateOf(0) }
+    var ttsReadPageIndex by rememberSaveable(bookKey) { mutableIntStateOf(0) }
+    var ttsCharOffset by rememberSaveable(bookKey) { mutableIntStateOf(0) }
+    var ttsSpeakBaseOffset by remember { mutableIntStateOf(0) }
+    var speakRequestToken by remember { mutableIntStateOf(0) }
+    var utteranceDoneToken by remember { mutableIntStateOf(0) }
+    var autoForwardToken by remember { mutableIntStateOf(0) }
+    var utteranceSerial by remember { mutableIntStateOf(0) }
+
+    val tts = remember {
+        TextToSpeech(context.applicationContext) { status ->
+            activity.runOnUiThread {
+                ttsReady = status == TextToSpeech.SUCCESS
+                ttsMessage = if (ttsReady) null else "Yerel ses motoru başlatılamadı."
+            }
+        }
+    }
+
+    DisposableEffect(tts) {
+        tts.setOnUtteranceProgressListener(
+            object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) = Unit
+
+                override fun onDone(utteranceId: String?) {
+                    activity.runOnUiThread {
+                        if (ttsActive && !ttsPaused) {
+                            ttsCharOffset = 0
+                            utteranceDoneToken++
+                        }
+                    }
+                }
+
+                override fun onError(utteranceId: String?) {
+                    activity.runOnUiThread {
+                        ttsMessage = "Sesli okuma sırasında bir hata oluştu."
+                        ttsActive = false
+                        ttsPaused = false
+                    }
+                }
+
+                override fun onRangeStart(
+                    utteranceId: String?,
+                    start: Int,
+                    end: Int,
+                    frame: Int
+                ) {
+                    activity.runOnUiThread {
+                        if (ttsActive && !ttsPaused) {
+                            ttsCharOffset = (ttsSpeakBaseOffset + start).coerceAtLeast(0)
+                        }
+                    }
+                }
+            }
+        )
+
+        onDispose {
+            tts.stop()
+            tts.shutdown()
+        }
+    }
+
+    LaunchedEffect(ttsReady, ttsRate) {
+        if (ttsReady) {
+            val localeResult = tts.setLanguage(Locale.getDefault())
+            if (
+                localeResult == TextToSpeech.LANG_MISSING_DATA ||
+                localeResult == TextToSpeech.LANG_NOT_SUPPORTED
+            ) {
+                tts.setLanguage(Locale("tr", "TR"))
+            }
+            tts.setSpeechRate(ttsRate)
+        }
+    }
 
     CompositionLocalProvider(
         LocalReaderPalette provides palette,
@@ -1043,12 +1127,107 @@ private fun ReaderScreen(
                         )
                     }
                 } else {
-                    val savedPage = remember(bookKey, pages.size) {
+                    val savedRawPage = remember(bookKey, pages.size) {
                         LibraryStore.readProgress(
                             context = context,
                             bookUri = bookKey,
                             lastPageIndex = pages.lastIndex
                         )
+                    }
+                    val savedPage = if (twoPage) {
+                        (savedRawPage - (savedRawPage % 2)).coerceAtLeast(0)
+                    } else {
+                        savedRawPage
+                    }
+
+                    LaunchedEffect(bookKey, pages.size, twoPage) {
+                        currentSpreadIndex = savedPage.coerceIn(0, pages.lastIndex)
+                        if (!ttsActive) {
+                            ttsReadPageIndex = currentSpreadIndex
+                            ttsCharOffset = 0
+                        }
+                    }
+
+                    fun speechText(page: ReaderPage): String {
+                        return buildString {
+                            if (page.chapter.isNotBlank()) {
+                                append(page.chapter.trim())
+                                append(". ")
+                            }
+                            append(page.body.trim())
+                        }.trim()
+                    }
+
+                    LaunchedEffect(
+                        speakRequestToken,
+                        ttsReady,
+                        ttsActive,
+                        ttsPaused,
+                        ttsRate,
+                        pages.size
+                    ) {
+                        if (
+                            speakRequestToken > 0 &&
+                            ttsReady &&
+                            ttsActive &&
+                            !ttsPaused
+                        ) {
+                            val page = pages.getOrNull(ttsReadPageIndex)
+                            val fullText = page?.let(::speechText).orEmpty()
+
+                            if (fullText.isBlank()) {
+                                utteranceDoneToken++
+                            } else {
+                                val safeOffset = ttsCharOffset
+                                    .coerceIn(0, (fullText.length - 1).coerceAtLeast(0))
+
+                                ttsSpeakBaseOffset = safeOffset
+                                utteranceSerial++
+
+                                tts.setSpeechRate(ttsRate)
+                                tts.speak(
+                                    fullText.substring(safeOffset),
+                                    TextToSpeech.QUEUE_FLUSH,
+                                    null,
+                                    "foldbook-${ttsReadPageIndex}-$utteranceSerial"
+                                )
+                            }
+                        }
+                    }
+
+                    LaunchedEffect(utteranceDoneToken) {
+                        if (
+                            utteranceDoneToken <= 0 ||
+                            !ttsActive ||
+                            ttsPaused
+                        ) return@LaunchedEffect
+
+                        val rightPageIndex = if (twoPage) {
+                            currentSpreadIndex + 1
+                        } else {
+                            currentSpreadIndex
+                        }
+
+                        if (
+                            twoPage &&
+                            ttsReadPageIndex < rightPageIndex &&
+                            ttsReadPageIndex + 1 <= pages.lastIndex
+                        ) {
+                            ttsReadPageIndex++
+                            ttsCharOffset = 0
+                            speakRequestToken++
+                        } else {
+                            val step = if (twoPage) 2 else 1
+                            if (currentSpreadIndex + step <= pages.lastIndex) {
+                                autoForwardToken++
+                            } else {
+                                tts.stop()
+                                ttsActive = false
+                                ttsPaused = false
+                                ttsCharOffset = 0
+                                ttsMessage = "Kitabın sonuna geldin."
+                            }
+                        }
                     }
 
                     BookSpread(
@@ -1061,44 +1240,161 @@ private fun ReaderScreen(
                                 bookUri = bookKey,
                                 pageIndex = pageIndex
                             )
+
+                            currentSpreadIndex = pageIndex
+
+                            if (ttsActive) {
+                                tts.stop()
+                                ttsReadPageIndex = pageIndex
+                                ttsCharOffset = 0
+
+                                if (!ttsPaused) {
+                                    speakRequestToken++
+                                }
+                            }
                         },
                         twoPage = twoPage,
+                        autoForwardToken = autoForwardToken,
                         modifier = Modifier.fillMaxSize()
                     )
-                }
 
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 14.dp)
-                        .zIndex(20f)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = Color.Black.copy(alpha = 0.72f)
+                    AnimatedVisibility(
+                        visible = controlsVisible,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 14.dp)
+                            .zIndex(20f)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = Color.Black.copy(alpha = 0.76f)
                         ) {
-                            Button(onClick = onBack) {
-                                Text("Rafa Dön")
-                            }
-
-                            listOf(
-                                ReaderThemeOption.LIGHT to "Açık",
-                                ReaderThemeOption.SEPIA to "Sepya",
-                                ReaderThemeOption.DARK to "Koyu"
-                            ).forEach { (option, label) ->
-                                Button(
-                                    onClick = {
-                                        themeName = option.name
-                                        LibraryStore.saveReaderTheme(context, option)
-                                    }
+                            Column(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(label)
+                                    Button(
+                                        onClick = {
+                                            tts.stop()
+                                            ttsActive = false
+                                            ttsPaused = false
+                                            onBack()
+                                        }
+                                    ) {
+                                        Text("Rafa Dön")
+                                    }
+
+                                    when {
+                                        !ttsReady -> {
+                                            Button(
+                                                onClick = {},
+                                                enabled = false
+                                            ) {
+                                                Text("🔊 Hazırlanıyor")
+                                            }
+                                        }
+
+                                        !ttsActive -> {
+                                            Button(
+                                                onClick = {
+                                                    ttsMessage = null
+                                                    ttsActive = true
+                                                    ttsPaused = false
+                                                    ttsReadPageIndex = currentSpreadIndex
+                                                    ttsCharOffset = 0
+                                                    speakRequestToken++
+                                                }
+                                            ) {
+                                                Text("🔊 Sesli Oku")
+                                            }
+                                        }
+
+                                        !ttsPaused -> {
+                                            Button(
+                                                onClick = {
+                                                    tts.stop()
+                                                    ttsPaused = true
+                                                }
+                                            ) {
+                                                Text("⏸ Duraklat")
+                                            }
+                                        }
+
+                                        else -> {
+                                            Button(
+                                                onClick = {
+                                                    ttsPaused = false
+                                                    speakRequestToken++
+                                                }
+                                            ) {
+                                                Text("▶ Devam")
+                                            }
+                                        }
+                                    }
+
+                                    if (ttsActive) {
+                                        Button(
+                                            onClick = {
+                                                tts.stop()
+                                                ttsActive = false
+                                                ttsPaused = false
+                                                ttsCharOffset = 0
+                                            }
+                                        ) {
+                                            Text("⏹ Durdur")
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            ttsRate = when (ttsRate) {
+                                                0.8f -> 1.0f
+                                                1.0f -> 1.2f
+                                                1.2f -> 1.5f
+                                                else -> 0.8f
+                                            }
+
+                                            if (ttsActive && !ttsPaused) {
+                                                tts.stop()
+                                                speakRequestToken++
+                                            }
+                                        }
+                                    ) {
+                                        Text("${ttsRate}x")
+                                    }
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    listOf(
+                                        ReaderThemeOption.LIGHT to "Açık",
+                                        ReaderThemeOption.SEPIA to "Sepya",
+                                        ReaderThemeOption.DARK to "Koyu"
+                                    ).forEach { (option, label) ->
+                                        Button(
+                                            onClick = {
+                                                themeName = option.name
+                                                LibraryStore.saveReaderTheme(context, option)
+                                            }
+                                        ) {
+                                            Text(label)
+                                        }
+                                    }
+                                }
+
+                                ttsMessage?.let { message ->
+                                    Text(
+                                        text = message,
+                                        modifier = Modifier.padding(horizontal = 4.dp),
+                                        fontSize = 12.sp,
+                                        color = Color.White.copy(alpha = 0.88f)
+                                    )
                                 }
                             }
                         }
@@ -1116,6 +1412,7 @@ private fun BookSpread(
     initialPageIndex: Int,
     onPageChanged: (Int) -> Unit,
     twoPage: Boolean,
+    autoForwardToken: Int = 0,
     modifier: Modifier = Modifier
 ) {
     var pageIndex by rememberSaveable(bookKey) {
@@ -1186,6 +1483,40 @@ private fun BookSpread(
         dragPx = 0f
         dragProgress = 0f
         turnDirection = 0
+    }
+
+    LaunchedEffect(autoForwardToken) {
+        if (
+            autoForwardToken > 0 &&
+            !settling &&
+            canTurn(1)
+        ) {
+            settling = true
+            turnDirection = 1
+            dragPx = -pageWidthPx
+            dragProgress = 0f
+
+            settleAnimation.snapTo(0f)
+            settleAnimation.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 360,
+                    easing = FastOutSlowInEasing
+                )
+            )
+
+            val newIndex = (pageIndex + step)
+                .coerceIn(0, pages.lastIndex.coerceAtLeast(0))
+
+            pageIndex = newIndex
+            onPageChanged(newIndex)
+
+            dragPx = 0f
+            dragProgress = 0f
+            turnDirection = 0
+            settleAnimation.snapTo(0f)
+            settling = false
+        }
     }
 
     val gestureModifier = Modifier
