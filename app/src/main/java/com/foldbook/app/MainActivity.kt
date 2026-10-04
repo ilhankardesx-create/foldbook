@@ -56,6 +56,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -95,7 +96,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -182,6 +185,10 @@ private val LocalReaderPalette = staticCompositionLocalOf {
 private val LocalReaderFontSize = staticCompositionLocalOf { ReaderFontSize.MEDIUM }
 private val LocalReaderPageCount = staticCompositionLocalOf { 0 }
 private val LocalAddNote = staticCompositionLocalOf<(String, Int) -> Unit> { { _, _ -> } }
+private val LocalBookHighlights = staticCompositionLocalOf<List<BookHighlight>> { emptyList() }
+private val LocalAddHighlight = staticCompositionLocalOf<(String, Int, Int, Int) -> Unit> {
+    { _, _, _, _ -> }
+}
 
 private fun fontSizeSp(size: ReaderFontSize): Float = when (size) {
     ReaderFontSize.SMALL -> 16f
@@ -1360,6 +1367,9 @@ private fun ReaderScreen(
     val densityInfo = LocalDensity.current
 
     var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
+    var highlights by remember(bookKey) {
+        mutableStateOf(LibraryStore.readHighlights(context, bookKey))
+    }
     var themeName by rememberSaveable(bookKey) {
         mutableStateOf(LibraryStore.readReaderTheme(context).name)
     }
@@ -1632,6 +1642,23 @@ private fun ReaderScreen(
                             Toast.makeText(
                                 context,
                                 "Notlara eklendi.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        LocalBookHighlights provides highlights,
+                        LocalAddHighlight provides { text, pageNumber, startOffset, endOffset ->
+                            LibraryStore.addHighlight(
+                                context = context,
+                                bookUri = bookKey,
+                                pageNumber = pageNumber,
+                                startOffset = startOffset,
+                                endOffset = endOffset,
+                                text = text
+                            )
+                            highlights = LibraryStore.readHighlights(context, bookKey)
+                            Toast.makeText(
+                                context,
+                                "Sarı fosforla çizildi.",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -2330,11 +2357,69 @@ private fun BookPage(
     val readerFontSize = LocalReaderFontSize.current
     val totalPages = LocalReaderPageCount.current
     val addNote = LocalAddNote.current
+    val highlights = LocalBookHighlights.current
+    val addHighlight = LocalAddHighlight.current
     val bodySize = fontSizeSp(readerFontSize)
     val bodyText = page?.body.orEmpty()
 
-    var bodyValue by remember(bodyText) {
-        mutableStateOf(TextFieldValue(bodyText))
+    val highlightRanges = remember(bodyText, pageNumber, highlights) {
+        buildList<Pair<Int, Int>> {
+            val usedIds = mutableSetOf<String>()
+
+            highlights.forEach { highlight ->
+                if (
+                    highlight.pageNumber == pageNumber &&
+                    highlight.startOffset >= 0 &&
+                    highlight.endOffset <= bodyText.length &&
+                    highlight.endOffset > highlight.startOffset
+                ) {
+                    val anchoredText = bodyText.substring(
+                        highlight.startOffset,
+                        highlight.endOffset
+                    )
+                    if (anchoredText.trim() == highlight.text.trim()) {
+                        add(highlight.startOffset to highlight.endOffset)
+                        usedIds += highlight.id
+                    }
+                }
+            }
+
+            highlights.forEach { highlight ->
+                if (highlight.id in usedIds) return@forEach
+                val quote = highlight.text.trim()
+                if (quote.length < 12) return@forEach
+
+                val foundAt = bodyText.indexOf(quote)
+                if (foundAt >= 0) {
+                    add(foundAt to (foundAt + quote.length))
+                }
+            }
+        }.distinct()
+    }
+
+    val highlightedBody = remember(bodyText, highlightRanges) {
+        buildAnnotatedString {
+            append(bodyText)
+            highlightRanges.forEach { (start, end) ->
+                if (start >= 0 && end <= bodyText.length && end > start) {
+                    addStyle(
+                        style = SpanStyle(
+                            background = Color(0xFFFFE45C).copy(alpha = 0.58f)
+                        ),
+                        start = start,
+                        end = end
+                    )
+                }
+            }
+        }
+    }
+
+    var bodyValue by remember(bodyText, highlightedBody) {
+        mutableStateOf(
+            TextFieldValue(
+                annotatedString = highlightedBody
+            )
+        )
     }
 
     val selectionStart = minOf(
@@ -2384,7 +2469,7 @@ private fun BookPage(
             ) {
                 if (isBackSide) {
                     Text(
-                        text = bodyText,
+                        text = highlightedBody,
                         fontSize = bodySize.sp,
                         lineHeight = (bodySize + 11f).sp,
                         fontFamily = FontFamily.Serif,
@@ -2395,7 +2480,7 @@ private fun BookPage(
                         value = bodyValue,
                         onValueChange = { next ->
                             bodyValue = TextFieldValue(
-                                text = bodyText,
+                                annotatedString = highlightedBody,
                                 selection = next.selection
                             )
                         },
@@ -2410,16 +2495,42 @@ private fun BookPage(
                     )
 
                     if (selectedText.isNotBlank()) {
-                        Button(
-                            onClick = {
-                                addNote(selectedText, pageNumber)
-                                bodyValue = TextFieldValue(bodyText)
-                            },
+                        Row(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
-                                .padding(bottom = 4.dp)
+                                .padding(bottom = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("Notlara Ekle")
+                            Button(
+                                onClick = {
+                                    addNote(selectedText, pageNumber)
+                                    bodyValue = TextFieldValue(
+                                        annotatedString = highlightedBody
+                                    )
+                                }
+                            ) {
+                                Text("Notlara Ekle")
+                            }
+
+                            Button(
+                                onClick = {
+                                    addHighlight(
+                                        bodyText.substring(selectionStart, selectionEnd),
+                                        pageNumber,
+                                        selectionStart,
+                                        selectionEnd
+                                    )
+                                    bodyValue = TextFieldValue(
+                                        annotatedString = highlightedBody
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFFD83D),
+                                    contentColor = Color(0xFF332A00)
+                                )
+                            ) {
+                                Text("Fosforla Çiz")
+                            }
                         }
                     }
                 }
