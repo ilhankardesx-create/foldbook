@@ -69,6 +69,48 @@ object EpubLoader {
         )
     }
 
+    fun loadCover(context: Context, uri: Uri): ByteArray? {
+        val container = readZipEntry(context, uri, "META-INF/container.xml")
+            ?: return null
+        val packagePath = runCatching { parseContainer(container) }.getOrNull()
+            ?: return null
+        val packageBytes = readZipEntry(context, uri, normalizePath(packagePath))
+            ?: return null
+        val packageInfo = runCatching { parsePackage(packageBytes) }.getOrNull()
+            ?: return null
+
+        val coverItem = packageInfo.coverId
+            ?.let { packageInfo.manifest[it] }
+            ?: packageInfo.manifest.values.firstOrNull { item ->
+                item.properties.split(' ').any { it.equals("cover-image", ignoreCase = true) } ||
+                    item.href.contains("cover", ignoreCase = true) &&
+                    item.mediaType.startsWith("image/")
+            }
+            ?: return null
+
+        val baseDir = packagePath.substringBeforeLast('/', "")
+        val coverPath = resolvePath(baseDir, coverItem.href)
+        return readZipEntry(context, uri, coverPath)
+    }
+
+    private fun readZipEntry(context: Context, uri: Uri, targetPath: String): ByteArray? {
+        val normalizedTarget = normalizePath(targetPath)
+        return context.contentResolver.openInputStream(uri)?.use { input ->
+            ZipInputStream(input.buffered()).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    if (!entry.isDirectory && normalizePath(entry.name) == normalizedTarget) {
+                        val output = ByteArrayOutputStream()
+                        zip.copyTo(output)
+                        return@use output.toByteArray()
+                    }
+                    zip.closeEntry()
+                }
+                null
+            }
+        }
+    }
+
     private fun shouldKeep(name: String): Boolean {
         val lower = name.lowercase()
         return lower.endsWith(".xml") ||
@@ -96,13 +138,15 @@ object EpubLoader {
 
     private data class ManifestItem(
         val href: String,
-        val mediaType: String
+        val mediaType: String,
+        val properties: String = ""
     )
 
     private data class PackageInfo(
         val title: String,
         val manifest: Map<String, ManifestItem>,
-        val spine: List<String>
+        val spine: List<String>,
+        val coverId: String? = null
     )
 
     private fun parsePackage(bytes: ByteArray): PackageInfo {
@@ -110,6 +154,7 @@ object EpubLoader {
         parser.setInput(ByteArrayInputStream(bytes), "UTF-8")
 
         var title = ""
+        var coverId: String? = null
         val manifest = linkedMapOf<String, ManifestItem>()
         val spine = mutableListOf<String>()
 
@@ -126,15 +171,27 @@ object EpubLoader {
                         val id = parser.getAttributeValue(null, "id")
                         val href = parser.getAttributeValue(null, "href")
                         val mediaType = parser.getAttributeValue(null, "media-type").orEmpty()
+                        val properties = parser.getAttributeValue(null, "properties").orEmpty()
 
                         if (!id.isNullOrBlank() && !href.isNullOrBlank()) {
-                            manifest[id] = ManifestItem(href, mediaType)
+                            manifest[id] = ManifestItem(href, mediaType, properties)
+                            if (properties.split(' ').any { it.equals("cover-image", ignoreCase = true) }) {
+                                coverId = id
+                            }
                         }
                     }
 
                     "itemref" -> {
                         val idRef = parser.getAttributeValue(null, "idref")
                         if (!idRef.isNullOrBlank()) spine += idRef
+                    }
+
+                    "meta" -> {
+                        val name = parser.getAttributeValue(null, "name")
+                        val content = parser.getAttributeValue(null, "content")
+                        if (name.equals("cover", ignoreCase = true) && !content.isNullOrBlank()) {
+                            coverId = content
+                        }
                     }
                 }
             }
@@ -157,7 +214,8 @@ object EpubLoader {
         return PackageInfo(
             title = title,
             manifest = manifest,
-            spine = fallbackSpine
+            spine = fallbackSpine,
+            coverId = coverId
         )
     }
 
