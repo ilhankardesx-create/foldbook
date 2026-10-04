@@ -221,156 +221,101 @@ private fun EpubBook.toReaderPages(
         pageHeightPx - (44f * density) - (30f * density)
     ).toInt().coerceAtLeast((bodyLineHeightPx * 4f).toInt())
 
-    return chapters.flatMap { chapter ->
-        val normalized = chapter.text
-            .replace("\r\n", "\n")
-            .replace('\r', '\n')
-            .replace(Regex("[ \\t]+"), " ")
-            .replace(Regex("\\n[ \\t]+"), "\n")
-            .replace(Regex("\\n{3,}"), "\n\n")
-            .trim()
+    return buildList {
+        for (chapter in chapters) {
+            val normalized = chapter.text
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace(Regex("[ \\t]+"), " ")
+                .replace(Regex("\\n[ \\t]+"), "\n")
+                .replace(Regex("\\n{3,}"), "\n\n")
+                .trim()
 
-        if (normalized.isBlank()) {
-            emptyList()
-        } else {
-            val chapterPages = mutableListOf<ReaderPage>()
-            var start = 0
+            if (normalized.isBlank()) continue
+
+            // Önceki sürüm her sayfa için metni tekrar tekrar ölçüyordu.
+            // Şimdi bölümün tamamını yalnızca BİR kez layout ediyoruz.
+            val bodyLayout = buildReaderLayout(
+                text = normalized,
+                paint = bodyPaint,
+                widthPx = contentWidthPx,
+                targetLineHeightPx = bodyLineHeightPx
+            )
+
+            if (bodyLayout.lineCount <= 0) continue
+
+            val titleHeightPx = if (chapter.title.isNotBlank()) {
+                buildReaderLayout(
+                    text = chapter.title,
+                    paint = titlePaint,
+                    widthPx = contentWidthPx,
+                    targetLineHeightPx = titleLineHeightPx
+                ).height + (16f * density).toInt()
+            } else {
+                0
+            }
+
+            var startLine = 0
             var firstPage = true
 
-            while (start < normalized.length) {
-                while (start < normalized.length && normalized[start].isWhitespace()) {
-                    start++
-                }
-                if (start >= normalized.length) break
-
-                val titleHeight = if (firstPage && chapter.title.isNotBlank()) {
-                    measureTextHeight(
-                        text = chapter.title,
-                        paint = titlePaint,
-                        widthPx = contentWidthPx,
-                        targetLineHeightPx = titleLineHeightPx
-                    ) + (16f * density).toInt()
+            while (startLine < bodyLayout.lineCount) {
+                val availableHeight = if (firstPage) {
+                    (contentHeightPx - titleHeightPx)
+                        .coerceAtLeast((bodyLineHeightPx * 3f).toInt())
                 } else {
-                    0
+                    contentHeightPx
                 }
 
-                val availableBodyHeight = (contentHeightPx - titleHeight)
-                    .coerceAtLeast((bodyLineHeightPx * 3f).toInt())
+                val pageTop = bodyLayout.getLineTop(startLine)
+                var endLine = startLine
 
-                var end = findFittingTextEnd(
-                    text = normalized,
-                    start = start,
-                    widthPx = contentWidthPx,
-                    maxHeightPx = availableBodyHeight,
-                    paint = bodyPaint,
-                    targetLineHeightPx = bodyLineHeightPx
-                )
-
-                if (end <= start) {
-                    end = (start + 1).coerceAtMost(normalized.length)
+                while (endLine + 1 < bodyLayout.lineCount) {
+                    val nextBottom = bodyLayout.getLineBottom(endLine + 1)
+                    if (nextBottom - pageTop > availableHeight) break
+                    endLine++
                 }
 
-                if (end < normalized.length) {
-                    var wordBoundary = end
-                    while (
-                        wordBoundary > start &&
-                        !normalized[wordBoundary - 1].isWhitespace()
-                    ) {
-                        wordBoundary--
-                    }
-                    if (wordBoundary > start) {
-                        end = wordBoundary
-                    }
-                }
+                val startOffset = bodyLayout.getLineStart(startLine)
+                val endOffset = bodyLayout.getLineEnd(endLine)
 
-                val body = normalized.substring(start, end).trim()
+                val body = normalized
+                    .substring(startOffset, endOffset)
+                    .trim()
+
                 if (body.isNotBlank()) {
-                    chapterPages += ReaderPage(
-                        chapter = if (firstPage) chapter.title else "",
-                        body = body
+                    add(
+                        ReaderPage(
+                            chapter = if (firstPage) chapter.title else "",
+                            body = body
+                        )
                     )
                     firstPage = false
                 }
 
-                start = end
+                startLine = endLine + 1
             }
-
-            chapterPages
         }
     }
 }
 
-private fun findFittingTextEnd(
-    text: String,
-    start: Int,
-    widthPx: Int,
-    maxHeightPx: Int,
-    paint: TextPaint,
-    targetLineHeightPx: Float
-): Int {
-    var low = start + 1
-    var high = text.length
-    var best = start
-
-    while (low <= high) {
-        val mid = (low + high) ushr 1
-        val height = measureTextHeight(
-            text = text,
-            start = start,
-            end = mid,
-            paint = paint,
-            widthPx = widthPx,
-            targetLineHeightPx = targetLineHeightPx
-        )
-
-        if (height <= maxHeightPx) {
-            best = mid
-            low = mid + 1
-        } else {
-            high = mid - 1
-        }
-    }
-
-    return best
-}
-
-private fun measureTextHeight(
+private fun buildReaderLayout(
     text: String,
     paint: TextPaint,
     widthPx: Int,
     targetLineHeightPx: Float
-): Int = measureTextHeight(
-    text = text,
-    start = 0,
-    end = text.length,
-    paint = paint,
-    widthPx = widthPx,
-    targetLineHeightPx = targetLineHeightPx
-)
-
-private fun measureTextHeight(
-    text: String,
-    start: Int,
-    end: Int,
-    paint: TextPaint,
-    widthPx: Int,
-    targetLineHeightPx: Float
-): Int {
-    if (end <= start) return 0
-
+): StaticLayout {
     val metrics = paint.fontMetrics
     val naturalLineHeight = metrics.descent - metrics.ascent
     val extraLineSpacing = (targetLineHeightPx - naturalLineHeight).coerceAtLeast(0f)
 
     return StaticLayout.Builder
-        .obtain(text, start, end, paint, widthPx.coerceAtLeast(1))
+        .obtain(text, 0, text.length, paint, widthPx.coerceAtLeast(1))
         .setAlignment(Layout.Alignment.ALIGN_NORMAL)
         .setIncludePad(false)
         .setLineSpacing(extraLineSpacing, 1f)
-        .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
-        .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
+        .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+        .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
         .build()
-        .height
 }
 
 @Composable
