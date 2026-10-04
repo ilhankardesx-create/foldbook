@@ -3,6 +3,8 @@ package com.foldbook.app
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class BookFormat { EPUB, PDF }
 enum class ReaderThemeOption { LIGHT, SEPIA, DARK }
@@ -16,6 +18,15 @@ data class LibraryBook(
     val isFavorite: Boolean = false
 )
 
+data class BookNote(
+    val id: String,
+    val bookUri: String,
+    val bookTitle: String,
+    val pageNumber: Int,
+    val text: String,
+    val createdAt: Long
+)
+
 object LibraryStore {
     private const val PREFS = "foldbook_library"
     private const val KEY_FOLDER_URI = "book_folder_uri"
@@ -27,6 +38,7 @@ object LibraryStore {
     private const val KEY_ACTIVE_BOOK_TITLE = "active_book_title"
     private const val KEY_ACTIVE_BOOK_FORMAT = "active_book_format"
     private const val KEY_FAVORITES = "favorite_book_uris"
+    private const val KEY_NOTES_JSON = "book_notes_json"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -262,6 +274,92 @@ object LibraryStore {
         }
 
         editor.apply()
+    }
+
+    fun addNote(
+        context: Context,
+        bookUri: String,
+        bookTitle: String,
+        pageNumber: Int,
+        text: String
+    ) {
+        val cleanText = text
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        if (cleanText.isBlank()) return
+
+        val now = System.currentTimeMillis()
+        val notes = readNotes(context).toMutableList()
+        notes.add(
+            0,
+            BookNote(
+                id = now.toString() + "-" + cleanText.hashCode().toString(),
+                bookUri = bookUri,
+                bookTitle = bookTitle.ifBlank { "Kitap" },
+                pageNumber = pageNumber.coerceAtLeast(1),
+                text = cleanText,
+                createdAt = now
+            )
+        )
+        saveNotes(context, notes)
+    }
+
+    fun readNotes(context: Context): List<BookNote> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_NOTES_JSON, "[]")
+            .orEmpty()
+
+        return runCatching {
+            val array = JSONArray(raw.ifBlank { "[]" })
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val text = item.optString("text").trim()
+                    if (text.isBlank()) continue
+
+                    add(
+                        BookNote(
+                            id = item.optString("id").ifBlank {
+                                item.optLong("createdAt").toString() + "-" + index
+                            },
+                            bookUri = item.optString("bookUri"),
+                            bookTitle = item.optString("bookTitle").ifBlank { "Kitap" },
+                            pageNumber = item.optInt("pageNumber", 1).coerceAtLeast(1),
+                            text = text,
+                            createdAt = item.optLong("createdAt", 0L)
+                        )
+                    )
+                }
+            }.sortedByDescending { it.createdAt }
+        }.getOrDefault(emptyList())
+    }
+
+    fun deleteNote(context: Context, noteId: String) {
+        saveNotes(
+            context,
+            readNotes(context).filterNot { it.id == noteId }
+        )
+    }
+
+    private fun saveNotes(context: Context, notes: List<BookNote>) {
+        val array = JSONArray()
+        notes.forEach { note ->
+            array.put(
+                JSONObject()
+                    .put("id", note.id)
+                    .put("bookUri", note.bookUri)
+                    .put("bookTitle", note.bookTitle)
+                    .put("pageNumber", note.pageNumber)
+                    .put("text", note.text)
+                    .put("createdAt", note.createdAt)
+            )
+        }
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_NOTES_JSON, array.toString())
+            .apply()
     }
 
     fun scanFolder(context: Context, treeUri: Uri): List<LibraryBook> {
