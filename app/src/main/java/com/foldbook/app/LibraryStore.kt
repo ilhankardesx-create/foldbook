@@ -21,6 +21,9 @@ object LibraryStore {
     private const val KEY_READER_THEME = "reader_theme"
     private const val KEY_LAST_OPENED_URI = "last_opened_uri"
     private const val KEY_READER_FONT_SIZE = "reader_font_size"
+    private const val KEY_ACTIVE_BOOK_URI = "active_book_uri"
+    private const val KEY_ACTIVE_BOOK_TITLE = "active_book_title"
+    private const val KEY_ACTIVE_BOOK_FORMAT = "active_book_format"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -35,6 +38,43 @@ object LibraryStore {
             ?: return null
 
         return runCatching { Uri.parse(value) }.getOrNull()
+    }
+
+    fun saveActiveBook(context: Context, book: LibraryBook) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACTIVE_BOOK_URI, book.uri)
+            .putString(KEY_ACTIVE_BOOK_TITLE, book.title)
+            .putString(KEY_ACTIVE_BOOK_FORMAT, book.format.name)
+            .apply()
+    }
+
+    fun clearActiveBook(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_ACTIVE_BOOK_URI)
+            .remove(KEY_ACTIVE_BOOK_TITLE)
+            .remove(KEY_ACTIVE_BOOK_FORMAT)
+            .apply()
+    }
+
+    fun readActiveBook(context: Context): LibraryBook? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val uri = prefs.getString(KEY_ACTIVE_BOOK_URI, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val title = prefs.getString(KEY_ACTIVE_BOOK_TITLE, "Kitap").orEmpty()
+        val format = runCatching {
+            BookFormat.valueOf(
+                prefs.getString(KEY_ACTIVE_BOOK_FORMAT, BookFormat.EPUB.name).orEmpty()
+            )
+        }.getOrDefault(BookFormat.EPUB)
+
+        return LibraryBook(
+            title = title.ifBlank { "Kitap" },
+            uri = uri,
+            format = format
+        )
     }
 
     fun saveLastOpened(context: Context, bookUri: String) {
