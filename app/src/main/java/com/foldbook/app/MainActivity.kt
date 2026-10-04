@@ -24,6 +24,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -612,6 +613,10 @@ private fun LibraryScreen(
         mutableStateOf(LibraryStore.readReaderFontSize(context))
     }
 
+    val lastOpenedUri = remember(books) {
+        LibraryStore.readLastOpened(context)
+    }
+
     val filteredBooks = remember(books, searchQuery) {
         val query = searchQuery.trim()
         if (query.isBlank()) {
@@ -1131,6 +1136,7 @@ private fun LibraryScreen(
                         ) { book ->
                             ShelfBook(
                                 book = book,
+                                isLastOpened = book.uri == lastOpenedUri,
                                 onClick = { onBookClick(book) },
                                 onLongPress = { actionBook = book }
                             )
@@ -1188,6 +1194,7 @@ private fun EmptyLibrary(
 @Composable
 private fun ShelfBook(
     book: LibraryBook,
+    isLastOpened: Boolean,
     onClick: () -> Unit,
     onLongPress: () -> Unit
 ) {
@@ -1221,7 +1228,10 @@ private fun ShelfBook(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(0.67f)
-            .shadow(6.dp, RoundedCornerShape(5.dp))
+            .shadow(
+                elevation = if (isLastOpened) 10.dp else 6.dp,
+                shape = RoundedCornerShape(5.dp)
+            )
             .pointerInput(book.uri) {
                 detectTapGestures(
                     onTap = { onClick() },
@@ -1270,6 +1280,19 @@ private fun ShelfBook(
                         color = Color(0xFFFFF8EA)
                     )
                 }
+            }
+
+            if (isLastOpened) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(
+                            width = 2.dp,
+                            color = Color(0xFFE7C98A).copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(5.dp)
+                        )
+                        .zIndex(3f)
+                )
             }
 
             if (book.isFavorite) {
