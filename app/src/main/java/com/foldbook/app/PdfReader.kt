@@ -226,37 +226,61 @@ private fun PdfSpread(
                 pageWidthPx = if (twoPage) it.width / 2f else it.width.toFloat()
             }
             .pointerInput(pageIndex, twoPage, pageWidthPx) {
+                var gestureDragPx = 0f
+
                 detectHorizontalDragGestures(
-                    onDragStart = { dragPx = 0f },
-                    onHorizontalDrag = { change, amount ->
-                        change.consume()
-                        val proposed = (dragPx + amount)
-                            .coerceIn(-pageWidthPx, pageWidthPx)
-                        val dir = when {
-                            proposed < 0 -> 1
-                            proposed > 0 -> -1
-                            else -> 0
-                        }
-                        dragPx = if (dir == 0 || canTurn(dir)) {
-                            proposed
-                        } else {
-                            proposed.coerceIn(-pageWidthPx * 0.06f, pageWidthPx * 0.06f)
-                        }
-                    },
-                    onDragEnd = {
-                        val dir = when {
-                            dragPx < 0 -> 1
-                            dragPx > 0 -> -1
-                            else -> 0
-                        }
-                        if (dir != 0 && canTurn(dir) && progress >= 0.20f) {
-                            pageIndex = (pageIndex + if (dir == 1) step else -step)
-                                .coerceIn(0, document.pageCount - 1)
-                            onPageChanged(pageIndex)
-                        }
+                    onDragStart = {
+                        gestureDragPx = 0f
                         dragPx = 0f
                     },
-                    onDragCancel = { dragPx = 0f }
+                    onHorizontalDrag = { change, amount ->
+                        change.consume()
+
+                        val proposed = (gestureDragPx + amount)
+                            .coerceIn(-pageWidthPx, pageWidthPx)
+                        val dir = when {
+                            proposed < 0f -> 1
+                            proposed > 0f -> -1
+                            else -> 0
+                        }
+
+                        gestureDragPx = if (dir == 0 || canTurn(dir)) {
+                            proposed
+                        } else {
+                            proposed.coerceIn(
+                                -pageWidthPx * 0.06f,
+                                pageWidthPx * 0.06f
+                            )
+                        }
+
+                        dragPx = gestureDragPx
+                    },
+                    onDragEnd = {
+                        val finalDrag = gestureDragPx
+                        val dir = when {
+                            finalDrag < 0f -> 1
+                            finalDrag > 0f -> -1
+                            else -> 0
+                        }
+                        val finalProgress =
+                            (abs(finalDrag) / pageWidthPx).coerceIn(0f, 1f)
+
+                        if (dir != 0 && canTurn(dir) && finalProgress >= 0.20f) {
+                            val newIndex =
+                                (pageIndex + if (dir == 1) step else -step)
+                                    .coerceIn(0, document.pageCount - 1)
+
+                            pageIndex = newIndex
+                            onPageChanged(newIndex)
+                        }
+
+                        gestureDragPx = 0f
+                        dragPx = 0f
+                    },
+                    onDragCancel = {
+                        gestureDragPx = 0f
+                        dragPx = 0f
+                    }
                 )
             }
     ) {
@@ -298,6 +322,18 @@ private fun PdfSpread(
                 )
             }
         } else {
+            val targetIndex = when (direction) {
+                1 -> (pageIndex + 1).takeIf { it < document.pageCount }
+                -1 -> (pageIndex - 1).takeIf { it >= 0 }
+                else -> pageIndex
+            }
+
+            PdfPage(
+                document = document,
+                index = targetIndex,
+                modifier = Modifier.fillMaxSize()
+            )
+
             PdfPage(
                 document = document,
                 index = pageIndex,
@@ -312,6 +348,7 @@ private fun PdfSpread(
                             }
                             rotationY = (if (direction == 1) -165f else 165f) * progress
                             cameraDistance = 30f
+                            shadowElevation = 16f * progress
                         }
                     }
             )
