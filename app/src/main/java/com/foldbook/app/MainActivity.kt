@@ -688,7 +688,7 @@ private fun LibraryScreen(
                     Spacer(Modifier.height(4.dp))
 
                     Text(
-                        text = "v0.9.3",
+                        text = "v0.9.4",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
