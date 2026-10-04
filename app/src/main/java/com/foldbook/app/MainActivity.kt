@@ -431,7 +431,7 @@ private fun LibraryScreen(
                 Spacer(Modifier.width(10.dp))
 
                 Text(
-                    text = "v0.5",
+                    text = "v0.8",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
@@ -536,14 +536,13 @@ private fun ShelfBook(
         key1 = book.uri,
         key2 = book.format
     ) {
-        value = if (book.format == BookFormat.EPUB) {
-            withContext(Dispatchers.IO) {
-                EpubLoader.loadCover(context, Uri.parse(book.uri))?.let { bytes ->
+        value = withContext(Dispatchers.IO) {
+            when (book.format) {
+                BookFormat.EPUB -> EpubLoader.loadCover(context, Uri.parse(book.uri))?.let { bytes ->
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 }
+                BookFormat.PDF -> loadPdfCover(context, Uri.parse(book.uri))
             }
-        } else {
-            null
         }
     }
 
