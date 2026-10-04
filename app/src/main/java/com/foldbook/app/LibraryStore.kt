@@ -100,6 +100,12 @@ object LibraryStore {
             .apply()
     }
 
+    fun readLastOpened(context: Context): String? {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_OPENED_URI, null)
+            ?.takeIf { it.isNotBlank() }
+    }
+
     fun saveReaderTheme(context: Context, theme: ReaderThemeOption) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
