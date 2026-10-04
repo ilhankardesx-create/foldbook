@@ -1,0 +1,87 @@
+name: FoldBook PDF Tap Fix
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch PDF tap handling
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          pdf = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          p = pdf.read_text()
+
+          old = '''import androidx.compose.foundation.gestures.detectHorizontalDragGestures\nimport androidx.compose.foundation.gestures.detectTapGestures\n'''
+          new = '''import androidx.compose.foundation.gestures.awaitEachGesture\nimport androidx.compose.foundation.gestures.awaitFirstDown\nimport androidx.compose.foundation.gestures.detectHorizontalDragGestures\n'''
+          if old not in p:
+              raise SystemExit('gesture imports anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = 'import androidx.compose.ui.input.pointer.pointerInput\n'
+          new = 'import androidx.compose.ui.input.pointer.PointerEventPass\nimport androidx.compose.ui.input.pointer.pointerInput\n'
+          if old not in p:
+              raise SystemExit('pointer import anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '''        BoxWithConstraints(\n            modifier = Modifier\n                .fillMaxSize()\n                .padding(3.dp)\n                .pointerInput(Unit) {\n                    detectTapGestures {\n                        controlsVisible = !controlsVisible\n                    }\n                }\n        ) {'''
+          new = '''        BoxWithConstraints(\n            modifier = Modifier\n                .fillMaxSize()\n                .padding(3.dp)\n        ) {'''
+          if old not in p:
+              raise SystemExit('outer tap anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '''                onPageChanged = { page ->\n                    LibraryStore.saveProgress(\n                        context = context,\n                        bookUri = bookKey,\n                        pageIndex = page\n                    )\n                },\n                modifier = Modifier.fillMaxSize()\n            )'''
+          new = '''                onPageChanged = { page ->\n                    LibraryStore.saveProgress(\n                        context = context,\n                        bookUri = bookKey,\n                        pageIndex = page\n                    )\n                },\n                onSingleTap = {\n                    controlsVisible = !controlsVisible\n                },\n                modifier = Modifier.fillMaxSize()\n            )'''
+          if old not in p:
+              raise SystemExit('PdfSpread call anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '''    theme: ReaderThemeOption,\n    onPageChanged: (Int) -> Unit,\n    modifier: Modifier = Modifier\n) {'''
+          new = '''    theme: ReaderThemeOption,\n    onPageChanged: (Int) -> Unit,\n    onSingleTap: () -> Unit = {},\n    modifier: Modifier = Modifier\n) {'''
+          if old not in p:
+              raise SystemExit('PdfSpread signature anchor missing')
+          p = p.replace(old, new, 1)
+
+          old = '''                onDragEnd = { settleTurn() },\n                onDragCancel = { settleTurn(cancelOnly = true) }\n            )\n        }\n\n    Box('''
+          new = '''                onDragEnd = { settleTurn() },\n                onDragCancel = { settleTurn(cancelOnly = true) }\n            )\n        }\n        .pointerInput(bookKey, pageIndex, twoPage) {\n            awaitEachGesture {\n                val down = awaitFirstDown(pass = PointerEventPass.Initial)\n                val startPosition = down.position\n                val startTime = down.uptimeMillis\n                var moved = false\n\n                while (true) {\n                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)\n                    val change = event.changes.firstOrNull { it.id == down.id }\n                        ?: break\n\n                    val dx = change.position.x - startPosition.x\n                    val dy = change.position.y - startPosition.y\n\n                    if (\n                        kotlin.math.abs(dx) > viewConfiguration.touchSlop ||\n                        kotlin.math.abs(dy) > viewConfiguration.touchSlop\n                    ) {\n                        moved = true\n                    }\n\n                    if (!change.pressed) {\n                        val duration = change.uptimeMillis - startTime\n                        if (\n                            !moved &&\n                            duration < viewConfiguration.longPressTimeoutMillis\n                        ) {\n                            onSingleTap()\n                        }\n                        break\n                    }\n                }\n            }\n        }\n\n    Box('''
+          if old not in p:
+              raise SystemExit('gesture modifier anchor missing')
+          p = p.replace(old, new, 1)
+          pdf.write_text(p)
+
+          gradle = Path('app/build.gradle.kts')
+          g = gradle.read_text()
+          if 'versionCode = 32' not in g or 'versionName = "0.9.21"' not in g:
+              raise SystemExit('version anchor missing')
+          g = g.replace('versionCode = 32', 'versionCode = 33', 1)
+          g = g.replace('versionName = "0.9.21"', 'versionName = "0.9.22"', 1)
+          gradle.write_text(g)
+
+          main = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          m = main.read_text()
+          m = m.replace('text = "v0.9.21"', 'text = "v0.9.22"', 1)
+          main.write_text(m)
+          PY
+
+      - name: Commit patch and remove helper
+        shell: bash
+        run: |
+          rm -f .github/workflows/pdf-tap-fix-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/foldbook/app/PdfReader.kt app/src/main/java/com/foldbook/app/MainActivity.kt app/build.gradle.kts .github/workflows/pdf-tap-fix-once.yml
+          git commit -m 'Separate PDF tap from page swipe'
+          git push
