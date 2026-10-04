@@ -12,8 +12,8 @@ android {
         applicationId = "com.foldbook.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.9.2"
+        versionCode = 14
+        versionName = "0.9.3"
     }
 
     compileOptions {
@@ -35,6 +35,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.window:window:1.3.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("com.android.billingclient:billing-ktx:9.1.0")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
