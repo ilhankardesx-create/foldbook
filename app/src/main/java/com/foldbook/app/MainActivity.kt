@@ -3,7 +3,12 @@ package com.foldbook.app
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.net.Uri
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -73,6 +78,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -161,12 +167,6 @@ private fun fontSizeSp(size: ReaderFontSize): Float = when (size) {
     ReaderFontSize.LARGE -> 21f
 }
 
-private fun pageCharLimit(size: ReaderFontSize): Int = when (size) {
-    ReaderFontSize.SMALL -> 730
-    ReaderFontSize.MEDIUM -> 610
-    ReaderFontSize.LARGE -> 500
-}
-
 private fun readerPalette(theme: ReaderThemeOption): ReaderPalette = when (theme) {
     ReaderThemeOption.LIGHT -> ReaderPalette(
         background = Color(0xFFE8DFD0),
@@ -188,64 +188,189 @@ private fun readerPalette(theme: ReaderThemeOption): ReaderPalette = when (theme
     )
 }
 
-private fun EpubBook.toReaderPages(fontSize: ReaderFontSize): List<ReaderPage> {
+private fun EpubBook.toReaderPages(
+    fontSize: ReaderFontSize,
+    pageWidthPx: Int,
+    pageHeightPx: Int,
+    density: Float,
+    scaledDensity: Float
+): List<ReaderPage> {
+    if (pageWidthPx <= 0 || pageHeightPx <= 0) return emptyList()
+
+    val bodySizeSp = fontSizeSp(fontSize)
+    val bodyTextSizePx = bodySizeSp * scaledDensity
+    val bodyLineHeightPx = (bodySizeSp + 11f) * scaledDensity
+
+    val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = bodyTextSizePx
+        typeface = Typeface.SERIF
+    }
+
+    val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = (bodySizeSp + 1.5f) * scaledDensity
+        typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+    }
+    val titleLineHeightPx = (bodySizeSp + 7f) * scaledDensity
+
+    // BookPage iç boşlukları + alttaki sayfa numarası için ayrılan alan.
+    val contentWidthPx = (
+        pageWidthPx - (56f * density)
+    ).toInt().coerceAtLeast(120)
+
+    val contentHeightPx = (
+        pageHeightPx - (44f * density) - (30f * density)
+    ).toInt().coerceAtLeast((bodyLineHeightPx * 4f).toInt())
+
     return chapters.flatMap { chapter ->
-        paginateText(
-            text = chapter.text,
-            maxChars = pageCharLimit(fontSize)
-        ).mapIndexed { pageIndex, body ->
-            ReaderPage(
-                chapter = if (pageIndex == 0) chapter.title else "",
-                body = body
-            )
+        val normalized = chapter.text
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replace(Regex("[ \\t]+"), " ")
+            .replace(Regex("\\n[ \\t]+"), "\n")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+
+        if (normalized.isBlank()) {
+            emptyList()
+        } else {
+            val chapterPages = mutableListOf<ReaderPage>()
+            var start = 0
+            var firstPage = true
+
+            while (start < normalized.length) {
+                while (start < normalized.length && normalized[start].isWhitespace()) {
+                    start++
+                }
+                if (start >= normalized.length) break
+
+                val titleHeight = if (firstPage && chapter.title.isNotBlank()) {
+                    measureTextHeight(
+                        text = chapter.title,
+                        paint = titlePaint,
+                        widthPx = contentWidthPx,
+                        targetLineHeightPx = titleLineHeightPx
+                    ) + (16f * density).toInt()
+                } else {
+                    0
+                }
+
+                val availableBodyHeight = (contentHeightPx - titleHeight)
+                    .coerceAtLeast((bodyLineHeightPx * 3f).toInt())
+
+                var end = findFittingTextEnd(
+                    text = normalized,
+                    start = start,
+                    widthPx = contentWidthPx,
+                    maxHeightPx = availableBodyHeight,
+                    paint = bodyPaint,
+                    targetLineHeightPx = bodyLineHeightPx
+                )
+
+                if (end <= start) {
+                    end = (start + 1).coerceAtMost(normalized.length)
+                }
+
+                if (end < normalized.length) {
+                    var wordBoundary = end
+                    while (
+                        wordBoundary > start &&
+                        !normalized[wordBoundary - 1].isWhitespace()
+                    ) {
+                        wordBoundary--
+                    }
+                    if (wordBoundary > start) {
+                        end = wordBoundary
+                    }
+                }
+
+                val body = normalized.substring(start, end).trim()
+                if (body.isNotBlank()) {
+                    chapterPages += ReaderPage(
+                        chapter = if (firstPage) chapter.title else "",
+                        body = body
+                    )
+                    firstPage = false
+                }
+
+                start = end
+            }
+
+            chapterPages
         }
     }
 }
 
-private fun paginateText(text: String, maxChars: Int = 610): List<String> {
-    val normalized = text
-        .replace("\r", "")
-        .replace(Regex("[ \\t]+"), " ")
-        .trim()
+private fun findFittingTextEnd(
+    text: String,
+    start: Int,
+    widthPx: Int,
+    maxHeightPx: Int,
+    paint: TextPaint,
+    targetLineHeightPx: Float
+): Int {
+    var low = start + 1
+    var high = text.length
+    var best = start
 
-    if (normalized.isBlank()) return emptyList()
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        val height = measureTextHeight(
+            text = text,
+            start = start,
+            end = mid,
+            paint = paint,
+            widthPx = widthPx,
+            targetLineHeightPx = targetLineHeightPx
+        )
 
-    val paragraphs = normalized
-        .split(Regex("\\n{2,}"))
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-
-    val pages = mutableListOf<String>()
-    val current = StringBuilder()
-
-    fun flush() {
-        if (current.isNotBlank()) {
-            pages += current.toString().trim()
-            current.clear()
+        if (height <= maxHeightPx) {
+            best = mid
+            low = mid + 1
+        } else {
+            high = mid - 1
         }
     }
 
-    for (paragraph in paragraphs) {
-        val words = paragraph.split(Regex("\\s+"))
+    return best
+}
 
-        for (word in words) {
-            if (current.length + word.length + 1 > maxChars && current.isNotBlank()) {
-                flush()
-            }
+private fun measureTextHeight(
+    text: String,
+    paint: TextPaint,
+    widthPx: Int,
+    targetLineHeightPx: Float
+): Int = measureTextHeight(
+    text = text,
+    start = 0,
+    end = text.length,
+    paint = paint,
+    widthPx = widthPx,
+    targetLineHeightPx = targetLineHeightPx
+)
 
-            if (current.isNotEmpty()) current.append(' ')
-            current.append(word)
-        }
+private fun measureTextHeight(
+    text: String,
+    start: Int,
+    end: Int,
+    paint: TextPaint,
+    widthPx: Int,
+    targetLineHeightPx: Float
+): Int {
+    if (end <= start) return 0
 
-        if (current.length > maxChars * 0.76f) {
-            flush()
-        } else if (current.isNotEmpty()) {
-            current.append("\n\n")
-        }
-    }
+    val metrics = paint.fontMetrics
+    val naturalLineHeight = metrics.descent - metrics.ascent
+    val extraLineSpacing = (targetLineHeightPx - naturalLineHeight).coerceAtLeast(0f)
 
-    flush()
-    return pages
+    return StaticLayout.Builder
+        .obtain(text, start, end, paint, widthPx.coerceAtLeast(1))
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setIncludePad(false)
+        .setLineSpacing(extraLineSpacing, 1f)
+        .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
+        .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
+        .build()
+        .height
 }
 
 @Composable
@@ -265,7 +390,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     var readerTitle by remember { mutableStateOf("") }
     var readerKey by remember { mutableStateOf("") }
     var readerFormat by remember { mutableStateOf(BookFormat.EPUB) }
-    var readerPages by remember { mutableStateOf<List<ReaderPage>>(emptyList()) }
+    var readerBook by remember { mutableStateOf<EpubBook?>(null) }
 
     LaunchedEffect(reading) {
         val controller = WindowCompat.getInsetsController(activity.window, view)
@@ -310,6 +435,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             readerFormat = book.format
 
             if (book.format == BookFormat.PDF) {
+                readerBook = null
                 readerTitle = book.title
                 reading = true
                 readerLoading = false
@@ -321,13 +447,10 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                     EpubLoader.load(context, Uri.parse(book.uri))
                 }
             }.onSuccess { epub ->
-                val pages = epub.toReaderPages(
-                    LibraryStore.readReaderFontSize(context)
-                )
-                if (pages.isEmpty()) {
+                if (epub.chapters.none { it.text.isNotBlank() }) {
                     readerError = "Bu EPUB içinde okunabilir metin bulunamadı."
                 } else {
-                    readerPages = pages
+                    readerBook = epub
                     readerTitle = epub.title.ifBlank { book.title }
                     reading = true
                 }
@@ -365,6 +488,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
 
     fun closeReader() {
         LibraryStore.clearActiveBook(context)
+        readerBook = null
         reading = false
         readerError = null
     }
@@ -381,12 +505,14 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 onBack = ::closeReader
             )
         } else {
-            ReaderScreen(
-                pages = readerPages,
-                bookKey = readerKey,
-                hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
-                onBack = ::closeReader
-            )
+            readerBook?.let { book ->
+                ReaderScreen(
+                    book = book,
+                    bookKey = readerKey,
+                    hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
+                    onBack = ::closeReader
+                )
+            }
         }
     } else {
         LibraryScreen(
@@ -876,19 +1002,13 @@ private fun ShelfBook(
 
 @Composable
 private fun ReaderScreen(
-    pages: List<ReaderPage>,
+    book: EpubBook,
     bookKey: String,
     hasSeparatingVerticalHinge: Boolean,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val savedPage = remember(bookKey, pages.size) {
-        LibraryStore.readProgress(
-            context = context,
-            bookUri = bookKey,
-            lastPageIndex = pages.lastIndex
-        )
-    }
+    val densityInfo = LocalDensity.current
 
     var controlsVisible by rememberSaveable(bookKey) { mutableStateOf(false) }
     var themeName by rememberSaveable(bookKey) {
@@ -922,20 +1042,80 @@ private fun ReaderScreen(
             ) {
                 val twoPage = hasSeparatingVerticalHinge || maxWidth >= 700.dp
 
-                BookSpread(
-                    pages = pages,
-                    bookKey = bookKey,
-                    initialPageIndex = savedPage,
-                    onPageChanged = { pageIndex ->
-                        LibraryStore.saveProgress(
+                val containerWidthPx = with(densityInfo) { maxWidth.toPx() }
+                val containerHeightPx = with(densityInfo) { maxHeight.toPx() }
+                val density = densityInfo.density
+                val scaledDensity = densityInfo.density * densityInfo.fontScale
+
+                val pageWidthPx = if (twoPage) {
+                    ((containerWidthPx - (10f * density)) / 2f)
+                        .toInt()
+                        .coerceAtLeast(1)
+                } else {
+                    (containerWidthPx - (6f * density))
+                        .toInt()
+                        .coerceAtLeast(1)
+                }
+
+                val pageHeightPx = (containerHeightPx - (8f * density))
+                    .toInt()
+                    .coerceAtLeast(1)
+
+                val pages by produceState(
+                    initialValue = emptyList<ReaderPage>(),
+                    book,
+                    fontSize,
+                    pageWidthPx,
+                    pageHeightPx,
+                    density,
+                    scaledDensity
+                ) {
+                    value = withContext(Dispatchers.Default) {
+                        book.toReaderPages(
+                            fontSize = fontSize,
+                            pageWidthPx = pageWidthPx,
+                            pageHeightPx = pageHeightPx,
+                            density = density,
+                            scaledDensity = scaledDensity
+                        )
+                    }
+                }
+
+                if (pages.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Sayfalar hazırlanıyor…",
+                            color = palette.text.copy(alpha = 0.72f),
+                            fontSize = 14.sp
+                        )
+                    }
+                } else {
+                    val savedPage = remember(bookKey, pages.size) {
+                        LibraryStore.readProgress(
                             context = context,
                             bookUri = bookKey,
-                            pageIndex = pageIndex
+                            lastPageIndex = pages.lastIndex
                         )
-                    },
-                    twoPage = twoPage,
-                    modifier = Modifier.fillMaxSize()
-                )
+                    }
+
+                    BookSpread(
+                        pages = pages,
+                        bookKey = bookKey,
+                        initialPageIndex = savedPage,
+                        onPageChanged = { pageIndex ->
+                            LibraryStore.saveProgress(
+                                context = context,
+                                bookUri = bookKey,
+                                pageIndex = pageIndex
+                            )
+                        },
+                        twoPage = twoPage,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 AnimatedVisibility(
                     visible = controlsVisible,
