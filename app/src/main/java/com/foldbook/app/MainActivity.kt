@@ -1345,7 +1345,6 @@ private fun ShelfBook(
             }
         }
     }
-    }
 }
 
 @Composable
