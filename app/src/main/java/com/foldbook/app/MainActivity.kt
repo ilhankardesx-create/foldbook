@@ -76,6 +76,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1814,16 +1815,28 @@ private fun BookSpread(
                 val newIndex = (pageIndex + if (direction == 1) step else -step)
                     .coerceIn(0, pages.lastIndex.coerceAtLeast(0))
 
-                pageIndex = newIndex
-                onPageChanged(newIndex)
-            }
+                Snapshot.withMutableSnapshot {
+                    pageIndex = newIndex
+                    dragPx = 0f
+                    dragProgress = 0f
+                    dragYFraction = 0.5f
+                    turnDirection = 0
+                    settling = false
+                }
 
-            dragPx = 0f
-            dragProgress = 0f
-            dragYFraction = 0.5f
-            turnDirection = 0
-            settleAnimation.snapTo(0f)
-            settling = false
+                onPageChanged(newIndex)
+                settleAnimation.snapTo(0f)
+            } else {
+                Snapshot.withMutableSnapshot {
+                    dragPx = 0f
+                    dragProgress = 0f
+                    dragYFraction = 0.5f
+                    turnDirection = 0
+                    settling = false
+                }
+
+                settleAnimation.snapTo(0f)
+            }
         }
     }
 
@@ -1870,15 +1883,17 @@ private fun BookSpread(
             val newIndex = (pageIndex + step)
                 .coerceIn(0, pages.lastIndex.coerceAtLeast(0))
 
-            pageIndex = newIndex
-            onPageChanged(newIndex)
+            Snapshot.withMutableSnapshot {
+                pageIndex = newIndex
+                dragPx = 0f
+                dragProgress = 0f
+                dragYFraction = 0.5f
+                turnDirection = 0
+                settling = false
+            }
 
-            dragPx = 0f
-            dragProgress = 0f
-            dragYFraction = 0.5f
-            turnDirection = 0
+            onPageChanged(newIndex)
             settleAnimation.snapTo(0f)
-            settling = false
         }
     }
 
