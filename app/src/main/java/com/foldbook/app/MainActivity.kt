@@ -297,6 +297,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
 
     fun openBook(book: LibraryBook) {
         LibraryStore.saveLastOpened(context, book.uri)
+        LibraryStore.saveActiveBook(context, book)
         library = listOf(book) + library.filterNot { it.uri == book.uri }
 
         scope.launch {
@@ -328,6 +329,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                     reading = true
                 }
             }.onFailure {
+                LibraryStore.clearActiveBook(context)
                 readerError = it.message ?: "Kitap açılamadı."
             }
 
@@ -352,11 +354,20 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
 
     LaunchedEffect(Unit) {
         LibraryStore.savedFolder(context)?.let { scanFolder(it) }
+
+        LibraryStore.readActiveBook(context)?.let { activeBook ->
+            openBook(activeBook)
+        }
+    }
+
+    fun closeReader() {
+        LibraryStore.clearActiveBook(context)
+        reading = false
+        readerError = null
     }
 
     BackHandler(enabled = reading) {
-        reading = false
-        readerError = null
+        closeReader()
     }
 
     if (reading) {
@@ -364,20 +375,14 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             PdfReaderScreen(
                 bookKey = readerKey,
                 hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
-                onBack = {
-                    reading = false
-                    readerError = null
-                }
+                onBack = ::closeReader
             )
         } else {
             ReaderScreen(
                 pages = readerPages,
                 bookKey = readerKey,
                 hasSeparatingVerticalHinge = hasSeparatingVerticalHinge,
-                onBack = {
-                    reading = false
-                    readerError = null
-                }
+                onBack = ::closeReader
             )
         }
     } else {
@@ -453,7 +458,7 @@ private fun LibraryScreen(
                 }
 
                 Text(
-                    text = "v0.9.0",
+                    text = "v0.9.1",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
