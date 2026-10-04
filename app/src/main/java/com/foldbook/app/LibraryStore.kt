@@ -196,7 +196,14 @@ object LibraryStore {
         book: LibraryBook,
         requestedTitle: String
     ): String {
-        val file = DocumentFile.fromSingleUri(context, Uri.parse(book.uri))
+        val treeUri = savedFolder(context)
+            ?: error("Kitap klasörü seçili değil.")
+
+        val root = DocumentFile.fromTreeUri(context, treeUri)
+            ?: error("Kitap klasörüne erişilemedi.")
+
+        val file = findDocumentByUri(root, book.uri)
+            ?: DocumentFile.fromSingleUri(context, Uri.parse(book.uri))
             ?: error("Kitap dosyasına erişilemedi.")
 
         val originalName = file.name.orEmpty()
@@ -227,26 +234,59 @@ object LibraryStore {
 
         val newUri = file.uri.toString()
 
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+
         if (newUri != oldUri) {
-            val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
+            editor
                 .remove(progressKey(oldUri))
                 .putInt(progressKey(newUri), oldProgress)
 
-            val lastOpened = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_LAST_OPENED_URI, null)
-            if (lastOpened == oldUri) {
+            if (prefs.getString(KEY_LAST_OPENED_URI, null) == oldUri) {
                 editor.putString(KEY_LAST_OPENED_URI, newUri)
             }
-            editor.apply()
 
-            if (wasFavorite) {
-                setFavorite(context, oldUri, false)
-                setFavorite(context, newUri, true)
+            if (prefs.getString(KEY_ACTIVE_BOOK_URI, null) == oldUri) {
+                editor.putString(KEY_ACTIVE_BOOK_URI, newUri)
             }
         }
 
+        if (prefs.getString(KEY_ACTIVE_BOOK_TITLE, null) == book.title) {
+            editor.putString(KEY_ACTIVE_BOOK_TITLE, safeTitle)
+        }
+
+        editor.apply()
+
+        if (newUri != oldUri && wasFavorite) {
+            setFavorite(context, oldUri, false)
+            setFavorite(context, newUri, true)
+        }
+
         return newUri
+    }
+
+    private fun findDocumentByUri(
+        directory: DocumentFile,
+        targetUri: String
+    ): DocumentFile? {
+        if (directory.uri.toString() == targetUri) {
+            return directory
+        }
+
+        for (child in directory.listFiles()) {
+            if (child.uri.toString() == targetUri) {
+                return child
+            }
+
+            if (child.isDirectory) {
+                val nested = findDocumentByUri(child, targetUri)
+                if (nested != null) {
+                    return nested
+                }
+            }
+        }
+
+        return null
     }
 
     fun deleteBook(context: Context, book: LibraryBook) {
