@@ -468,7 +468,15 @@ private fun PdfSpread(
             settling = true
             settleAnimation.snapTo(start)
             settleAnimation.animateTo(
-                targetValue = if (shouldComplete) 1f else 0f,
+                targetValue = if (shouldComplete) {
+                    // PDF bitmap texture'ını Fold modunda tam 180 dereceye kadar
+                    // götürmek bazı GPU'larda son frame ghosting/parlama bırakıyor.
+                    // Telefon/tek sayfa motoruna dokunmadan yalnızca Fold'da
+                    // final spread'e çok küçük bir açı kala atomik geçiyoruz.
+                    if (twoPage) 0.985f else 1f
+                } else {
+                    0f
+                },
                 animationSpec = tween(
                     durationMillis = if (shouldComplete) 235 else 155,
                     easing = FastOutSlowInEasing
@@ -700,7 +708,7 @@ private fun PdfTwoPageSpread(
         ) {
             val leftIndex = if (isBackward) pageIndex - 2 else pageIndex
 
-            PdfPage(
+            PdfStablePage(
                 document = document,
                 index = leftIndex,
                 theme = theme,
@@ -736,7 +744,7 @@ private fun PdfTwoPageSpread(
         ) {
             val rightIndex = if (isForward) pageIndex + 3 else pageIndex + 1
 
-            PdfPage(
+            PdfStablePage(
                 document = document,
                 index = rightIndex,
                 theme = theme,
@@ -776,6 +784,42 @@ private fun PdfBookSpine(progress: Float) {
                 RoundedCornerShape(50)
             )
     )
+}
+
+@Composable
+private fun PdfStablePage(
+    document: PdfBookDocument,
+    index: Int?,
+    theme: ReaderThemeOption,
+    renderWidthPx: Int,
+    modifier: Modifier = Modifier
+) {
+    if (index == null || index !in 0 until document.pageCount) {
+        Box(modifier = modifier)
+        return
+    }
+
+    // Fold sayfa çevirme başlamadan gereken dört bitmap zaten cache'e alınıyor.
+    // Cache hazırsa produceState/IO teslimi yerine aynı bitmap'i doğrudan kullanmak,
+    // animasyon sonundaki eski-yeni texture üst üste binmesini engelliyor.
+    val cached = document.cachedPage(index, renderWidthPx, theme)
+    if (cached != null) {
+        PdfFrozenPage(
+            bitmap = cached,
+            index = index,
+            theme = theme,
+            modifier = modifier
+        )
+    } else {
+        // İlk açılış gibi cache'in henüz ısınmadığı durumda normal yükleme devam eder.
+        PdfPage(
+            document = document,
+            index = index,
+            theme = theme,
+            renderWidthPx = renderWidthPx,
+            modifier = modifier
+        )
+    }
 }
 
 @Composable
