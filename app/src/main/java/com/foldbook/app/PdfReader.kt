@@ -382,36 +382,44 @@ private class PdfBookDocument(
         source: Bitmap,
         theme: ReaderThemeOption
     ): Bitmap {
-        when (theme) {
+        if (theme == ReaderThemeOption.LIGHT) return source
+
+        // PDF sayfasını düz renk bindirmesi veya tam negatif yapmak yerine
+        // luminance tabanlı okuyucu tonlarına eşliyoruz. Bu özellikle taranmış
+        // kitaplarda kağıt dokusunu daha sakin tutar, yazıyı da EPUB temasına
+        // daha yakın ve göz yormayan bir tonda gösterir.
+        val matrixValues = when (theme) {
             ReaderThemeOption.LIGHT -> return source
-            ReaderThemeOption.SEPIA -> {
-                Canvas(source).drawColor(
-                    android.graphics.Color.argb(34, 214, 168, 96)
-                )
-                return source
-            }
-            ReaderThemeOption.DARK -> {
-                val output = Bitmap.createBitmap(
-                    source.width,
-                    source.height,
-                    Bitmap.Config.ARGB_8888
-                )
-                val matrix = ColorMatrix(
-                    floatArrayOf(
-                        -1f, 0f, 0f, 0f, 255f,
-                        0f, -1f, 0f, 0f, 255f,
-                        0f, 0f, -1f, 0f, 255f,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                val paint = Paint().apply {
-                    colorFilter = ColorMatrixColorFilter(matrix)
-                }
-                Canvas(output).drawBitmap(source, 0f, 0f, paint)
-                source.recycle()
-                return output
-            }
+
+            ReaderThemeOption.SEPIA -> floatArrayOf(
+                // Siyah mürekkep -> koyu kahve, beyaz kağıt -> açık krem
+                0.2181f, 0.4282f, 0.0832f, 0f, 58f,
+                0.2193f, 0.4305f, 0.0836f, 0f, 45f,
+                0.2075f, 0.4078f, 0.0791f, 0f, 31f,
+                0f, 0f, 0f, 1f, 0f
+            )
+
+            ReaderThemeOption.DARK -> floatArrayOf(
+                // Tam negatif yerine kömür kağıt + kırık beyaz yazı.
+                // Böylece beyaz patlamalar ve tarama lekeleri daha az rahatsız eder.
+                -0.2286f, -0.4489f, -0.0872f, 0f, 222f,
+                -0.2240f, -0.4397f, -0.0854f, 0f, 218f,
+                -0.2122f, -0.4167f, -0.0809f, 0f, 208f,
+                0f, 0f, 0f, 1f, 0f
+            )
         }
+
+        val output = Bitmap.createBitmap(
+            source.width,
+            source.height,
+            Bitmap.Config.ARGB_8888
+        )
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(ColorMatrix(matrixValues))
+        }
+        Canvas(output).drawBitmap(source, 0f, 0f, paint)
+        source.recycle()
+        return output
     }
 
     override fun close() {
