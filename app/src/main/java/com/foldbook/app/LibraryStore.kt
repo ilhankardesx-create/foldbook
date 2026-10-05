@@ -27,6 +27,13 @@ data class BookNote(
     val createdAt: Long
 )
 
+data class HighlightBox(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+)
+
 data class BookHighlight(
     val id: String,
     val bookUri: String,
@@ -34,6 +41,7 @@ data class BookHighlight(
     val startOffset: Int,
     val endOffset: Int,
     val text: String,
+    val bounds: List<HighlightBox> = emptyList(),
     val createdAt: Long
 )
 
@@ -430,7 +438,8 @@ object LibraryStore {
         pageNumber: Int,
         startOffset: Int,
         endOffset: Int,
-        text: String
+        text: String,
+        bounds: List<HighlightBox> = emptyList()
     ) {
         val cleanText = text.trim()
         if (cleanText.isBlank() || endOffset <= startOffset) return
@@ -454,6 +463,7 @@ object LibraryStore {
                 startOffset = startOffset.coerceAtLeast(0),
                 endOffset = endOffset.coerceAtLeast(startOffset + 1),
                 text = cleanText,
+                bounds = bounds,
                 createdAt = now
             )
         )
@@ -484,6 +494,33 @@ object LibraryStore {
                     val end = item.optInt("endOffset", -1)
                     if (text.isBlank() || start < 0 || end <= start) continue
 
+                    val savedBounds = buildList {
+                        val boundsArray = item.optJSONArray("bounds")
+                        if (boundsArray != null) {
+                            for (boundIndex in 0 until boundsArray.length()) {
+                                val bound = boundsArray.optJSONObject(boundIndex) ?: continue
+                                val left = bound.optDouble("left", Double.NaN)
+                                val top = bound.optDouble("top", Double.NaN)
+                                val right = bound.optDouble("right", Double.NaN)
+                                val bottom = bound.optDouble("bottom", Double.NaN)
+                                if (
+                                    left.isFinite() && top.isFinite() &&
+                                    right.isFinite() && bottom.isFinite() &&
+                                    right > left && bottom > top
+                                ) {
+                                    add(
+                                        HighlightBox(
+                                            left = left.toFloat(),
+                                            top = top.toFloat(),
+                                            right = right.toFloat(),
+                                            bottom = bottom.toFloat()
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     add(
                         BookHighlight(
                             id = item.optString("id").ifBlank {
@@ -494,6 +531,7 @@ object LibraryStore {
                             startOffset = start,
                             endOffset = end,
                             text = text,
+                            bounds = savedBounds,
                             createdAt = item.optLong("createdAt", 0L)
                         )
                     )
@@ -516,6 +554,20 @@ object LibraryStore {
                     .put("startOffset", highlight.startOffset)
                     .put("endOffset", highlight.endOffset)
                     .put("text", highlight.text)
+                    .put(
+                        "bounds",
+                        JSONArray().apply {
+                            highlight.bounds.forEach { bound ->
+                                put(
+                                    JSONObject()
+                                        .put("left", bound.left.toDouble())
+                                        .put("top", bound.top.toDouble())
+                                        .put("right", bound.right.toDouble())
+                                        .put("bottom", bound.bottom.toDouble())
+                                )
+                            }
+                        }
+                    )
                     .put("createdAt", highlight.createdAt)
             )
         }

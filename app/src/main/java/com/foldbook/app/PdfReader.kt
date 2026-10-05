@@ -57,6 +57,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
@@ -1598,11 +1599,18 @@ private fun PdfPageSurface(
         value = if (document.supportsTextSelection && pageHighlights.isNotEmpty()) {
             withContext(Dispatchers.IO) {
                 pageHighlights.flatMap { highlight ->
-                    document.selectByIndices(
-                        index = index,
-                        startIndex = highlight.startOffset,
-                        endIndex = highlight.endOffset
-                    )?.bounds.orEmpty()
+                    if (highlight.bounds.isNotEmpty()) {
+                        highlight.bounds.map { bound ->
+                            RectF(bound.left, bound.top, bound.right, bound.bottom)
+                        }
+                    } else {
+                        // Eski kayıtlar için geriye dönük destek.
+                        document.selectByIndices(
+                            index = index,
+                            startIndex = highlight.startOffset,
+                            endIndex = highlight.endOffset
+                        )?.bounds.orEmpty()
+                    }
                 }
             }
         } else {
@@ -1834,15 +1842,48 @@ private fun PdfPageSurface(
             )
 
             ComposeCanvas(modifier = Modifier.fillMaxSize()) {
+                val markerColor = when (theme) {
+                    ReaderThemeOption.LIGHT -> Color(0xFFDFFF3F).copy(alpha = 0.60f)
+                    ReaderThemeOption.SEPIA -> Color(0xFFD8F23B).copy(alpha = 0.54f)
+                    ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)
+                }
+                val markerSheen = when (theme) {
+                    ReaderThemeOption.LIGHT -> Color(0xFFE9FF64).copy(alpha = 0.24f)
+                    ReaderThemeOption.SEPIA -> Color(0xFFE6F75C).copy(alpha = 0.20f)
+                    ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)
+                }
+                val markerBleed = 1.8.dp.toPx()
+                val markerRadius = 2.8.dp.toPx()
+
                 savedHighlightBounds.forEach { rect ->
                     toDisplayRect(rect)?.let { shown ->
-                        drawRect(
-                            color = Color(0xFFFFE45C).copy(alpha = 0.46f),
-                            topLeft = Offset(shown.left, shown.top),
+                        val lineHeight = (shown.bottom - shown.top).coerceAtLeast(1f)
+                        val markerTop = shown.top + lineHeight * 0.04f
+                        val markerBottom = shown.bottom - lineHeight * 0.02f
+                        val markerHeight = (markerBottom - markerTop).coerceAtLeast(1f)
+                        val markerWidth =
+                            (shown.right - shown.left + markerBleed * 2f).coerceAtLeast(1f)
+
+                        // İki yarı saydam katman gerçek fosforlu kalem izindeki
+                        // yoğunluk farkını taklit ediyor.
+                        drawRoundRect(
+                            color = markerColor,
+                            topLeft = Offset(shown.left - markerBleed, markerTop),
+                            size = Size(markerWidth, markerHeight),
+                            cornerRadius = CornerRadius(markerRadius, markerRadius)
+                        )
+                        drawRoundRect(
+                            color = markerSheen,
+                            topLeft = Offset(
+                                shown.left - markerBleed * 0.45f,
+                                markerTop + lineHeight * 0.17f
+                            ),
                             size = Size(
-                                (shown.right - shown.left).coerceAtLeast(1f),
-                                (shown.bottom - shown.top).coerceAtLeast(1f)
-                            )
+                                (shown.right - shown.left + markerBleed * 0.9f)
+                                    .coerceAtLeast(1f),
+                                (markerHeight * 0.56f).coerceAtLeast(1f)
+                            ),
+                            cornerRadius = CornerRadius(markerRadius, markerRadius)
                         )
                     }
                 }
@@ -1914,7 +1955,15 @@ private fun PdfPageSurface(
                                 pageNumber = index + 1,
                                 startOffset = chosen.startIndex,
                                 endOffset = chosen.endIndex,
-                                text = chosen.text
+                                text = chosen.text,
+                                bounds = chosen.bounds.map { rect ->
+                                    HighlightBox(
+                                        left = rect.left,
+                                        top = rect.top,
+                                        right = rect.right,
+                                        bottom = rect.bottom
+                                    )
+                                }
                             )
                             onHighlightsChanged()
                             Toast.makeText(

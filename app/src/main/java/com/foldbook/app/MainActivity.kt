@@ -1098,7 +1098,7 @@ private fun LibraryScreen(
                             )
 
                             Text(
-                                text = "v0.9.29",
+                                text = "v0.9.30",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                             )
@@ -2409,7 +2409,7 @@ private fun BookPage(
                 if (start >= 0 && end <= bodyText.length && end > start) {
                     addStyle(
                         style = SpanStyle(
-                            background = Color(0xFFFFE45C).copy(alpha = 0.58f)
+                            background = Color(0xFFDFFF3F).copy(alpha = 0.62f)
                         ),
                         start = start,
                         end = end
