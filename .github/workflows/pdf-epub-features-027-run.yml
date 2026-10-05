@@ -1,0 +1,63 @@
+name: FoldBook PDF EPUB Features 0.9.27
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply PDF EPUB feature parity patch
+        run: python3 tools/apply_pdf_epub_features_027.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build debug APK and release AAB
+        run: gradle assembleDebug bundleRelease --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FoldBook-0.9.27-pdf-features-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: FoldBook-0.9.27-pdf-features-aab
+          path: app/build/outputs/bundle/release/app-release.aab
+
+      - name: Commit patch and remove helpers
+        if: success()
+        run: |
+          rm -f tools/apply_pdf_epub_features_027.py .github/workflows/pdf-epub-features-027-run.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/foldbook/app/PdfReader.kt app/src/main/java/com/foldbook/app/MainActivity.kt app/build.gradle.kts tools/apply_pdf_epub_features_027.py .github/workflows/pdf-epub-features-027-run.yml
+          git commit -m 'Add EPUB reading features to PDF reader'
+          git push
