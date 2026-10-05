@@ -1098,7 +1098,7 @@ private fun LibraryScreen(
                             )
 
                             Text(
-                                text = "v0.9.27",
+                                text = "v0.9.28",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                             )

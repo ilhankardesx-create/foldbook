@@ -1569,9 +1569,13 @@ private fun PdfPageSurface(
     val scope = rememberCoroutineScope()
     val geometry = document.cachedGeometry(index, renderWidthPx, theme)
     var boxSize by remember(index, bitmap) { mutableStateOf(IntSize.Zero) }
+    // PDF_SELECTION_HANDLES_028: EPUB-benzeri iki uçlu metin seçimi.
     var selection by remember(index) { mutableStateOf<PdfSelectionSnapshot?>(null) }
+    var selectionStartPoint by remember(index) { mutableStateOf<Point?>(null) }
+    var selectionEndPoint by remember(index) { mutableStateOf<Point?>(null) }
     var dragStart by remember(index) { mutableStateOf<Offset?>(null) }
     var dragEnd by remember(index) { mutableStateOf<Offset?>(null) }
+    var handlePreview by remember(index) { mutableStateOf<Pair<Int, Offset>?>(null) }
     val imagePaddingPx = with(densityInfo) { 2.dp.toPx() }
 
     val pageHighlights = remember(index, highlights) {
@@ -1647,17 +1651,68 @@ private fun PdfPageSurface(
         return RectF(x(rect.left), y(rect.top), x(rect.right), y(rect.bottom))
     }
 
+    val handleKnobOffsetPx = with(densityInfo) { 7.dp.toPx() }
+    val handleRadiusPx = with(densityInfo) { 6.5.dp.toPx() }
+    val handleTouchRadiusPx = with(densityInfo) { 30.dp.toPx() }
+
+    fun orderedPdfPoints(first: Point, second: Point): Pair<Point, Point> {
+        val firstComesBefore =
+            first.y < second.y || (first.y == second.y && first.x <= second.x)
+        return if (firstComesBefore) first to second else second to first
+    }
+
+    fun normalizedSelectionPoints(first: Point, second: Point): Pair<Point, Point> {
+        val g = geometry ?: return orderedPdfPoints(first, second)
+        val almostSame =
+            kotlin.math.abs(first.x - second.x) <= 2 &&
+                kotlin.math.abs(first.y - second.y) <= 2
+        val expandedSecond = if (almostSame) {
+            val forwardX = (first.x + 18).coerceAtMost(g.pageWidthPoints)
+            if (forwardX != first.x) Point(forwardX, first.y)
+            else Point((first.x - 18).coerceAtLeast(0), first.y)
+        } else second
+        return orderedPdfPoints(first, expandedSecond)
+    }
+
+    fun selectionHandleCenters(snapshot: PdfSelectionSnapshot?): Pair<Offset, Offset>? {
+        val shown = snapshot?.bounds?.mapNotNull(::toDisplayRect).orEmpty()
+        if (shown.isEmpty()) return null
+        val first = shown.first()
+        val last = shown.last()
+        return Offset(first.left, first.bottom + handleKnobOffsetPx) to
+            Offset(last.right, last.bottom + handleKnobOffsetPx)
+    }
+
+    fun launchSelection(rawStart: Point, rawEnd: Point) {
+        val (startPoint, endPoint) = normalizedSelectionPoints(rawStart, rawEnd)
+        selectionStartPoint = startPoint
+        selectionEndPoint = endPoint
+        scope.launch {
+            val chosen = withContext(Dispatchers.IO) {
+                document.selectByPoints(index, startPoint, endPoint)
+            }
+            if (chosen == null || chosen.text.isBlank()) {
+                selection = null
+                selectionStartPoint = null
+                selectionEndPoint = null
+            } else {
+                selection = chosen
+            }
+        }
+    }
+
     val selectionModifier = if (
-        interactive &&
-        document.supportsTextSelection &&
-        geometry != null
+        interactive && document.supportsTextSelection && geometry != null
     ) {
-        Modifier.pointerInput(index, boxSize, renderWidthPx) {
+        var result = Modifier.pointerInput(index, boxSize, renderWidthPx) {
             detectDragGesturesAfterLongPress(
                 onDragStart = { offset ->
                     dragStart = offset
                     dragEnd = offset
                     selection = null
+                    selectionStartPoint = null
+                    selectionEndPoint = null
+                    handlePreview = null
                 },
                 onDrag = { change, _ ->
                     change.consume()
@@ -1669,11 +1724,7 @@ private fun PdfPageSurface(
                     dragStart = null
                     dragEnd = null
                     if (startPoint != null && stopPoint != null) {
-                        scope.launch {
-                            selection = withContext(Dispatchers.IO) {
-                                document.selectByPoints(index, startPoint, stopPoint)
-                            }
-                        }
+                        launchSelection(startPoint, stopPoint)
                     }
                 },
                 onDragCancel = {
@@ -1682,9 +1733,73 @@ private fun PdfPageSurface(
                 }
             )
         }
-    } else {
-        Modifier
-    }
+
+        if (selection != null) {
+            result = result.pointerInput(index, selection, boxSize, renderWidthPx) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(
+                        pass = PointerEventPass.Initial,
+                        requireUnconsumed = false
+                    )
+                    val handles = selectionHandleCenters(selection)
+                    if (handles == null) {
+                        while (true) {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                        }
+                        return@awaitEachGesture
+                    }
+
+                    fun distanceSquared(a: Offset, b: Offset): Float {
+                        val dx = a.x - b.x
+                        val dy = a.y - b.y
+                        return dx * dx + dy * dy
+                    }
+
+                    val r2 = handleTouchRadiusPx * handleTouchRadiusPx
+                    val startDistance = distanceSquared(down.position, handles.first)
+                    val endDistance = distanceSquared(down.position, handles.second)
+                    val activeHandle = when {
+                        startDistance <= r2 && startDistance <= endDistance -> 1
+                        endDistance <= r2 -> 2
+                        else -> 0
+                    }
+
+                    if (activeHandle == 0) {
+                        while (true) {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                        }
+                        return@awaitEachGesture
+                    }
+
+                    down.consume()
+                    var latest = down.position
+                    handlePreview = activeHandle to latest
+                    while (true) {
+                        val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        latest = change.position
+                        handlePreview = activeHandle to latest
+                        change.consume()
+                        if (!change.pressed) break
+                    }
+
+                    val moved = toPdfPoint(latest)
+                    val fixedStart = selectionStartPoint
+                    val fixedEnd = selectionEndPoint
+                    handlePreview = null
+                    if (moved != null && fixedStart != null && fixedEnd != null) {
+                        if (activeHandle == 1) launchSelection(moved, fixedEnd)
+                        else launchSelection(fixedStart, moved)
+                    }
+                }
+            }
+        }
+        result
+    } else Modifier
 
     Surface(
         modifier = modifier
@@ -1723,16 +1838,38 @@ private fun PdfPageSurface(
                         )
                     }
                 }
-                selection?.bounds?.forEach { rect ->
-                    toDisplayRect(rect)?.let { shown ->
-                        drawRect(
-                            color = Color(0xFF74A9FF).copy(alpha = 0.34f),
-                            topLeft = Offset(shown.left, shown.top),
-                            size = Size(
-                                (shown.right - shown.left).coerceAtLeast(1f),
-                                (shown.bottom - shown.top).coerceAtLeast(1f)
+                selection?.let { chosen ->
+                    chosen.bounds.forEach { rect ->
+                        toDisplayRect(rect)?.let { shown ->
+                            drawRect(
+                                color = Color(0xFF74A9FF).copy(alpha = 0.34f),
+                                topLeft = Offset(shown.left, shown.top),
+                                size = Size(
+                                    (shown.right - shown.left).coerceAtLeast(1f),
+                                    (shown.bottom - shown.top).coerceAtLeast(1f)
+                                )
                             )
+                        }
+                    }
+                    selectionHandleCenters(chosen)?.let { baseHandles ->
+                        val preview = handlePreview
+                        val startCenter = if (preview?.first == 1) preview.second else baseHandles.first
+                        val endCenter = if (preview?.first == 2) preview.second else baseHandles.second
+                        val handleColor = Color(0xFF2F6FED)
+                        drawLine(
+                            color = handleColor,
+                            start = Offset(startCenter.x, startCenter.y - handleKnobOffsetPx),
+                            end = startCenter,
+                            strokeWidth = 2.2.dp.toPx()
                         )
+                        drawCircle(handleColor, handleRadiusPx, startCenter)
+                        drawLine(
+                            color = handleColor,
+                            start = Offset(endCenter.x, endCenter.y - handleKnobOffsetPx),
+                            end = endCenter,
+                            strokeWidth = 2.2.dp.toPx()
+                        )
+                        drawCircle(handleColor, handleRadiusPx, endCenter)
                     }
                 }
             }
@@ -1754,6 +1891,9 @@ private fun PdfPageSurface(
                         )
                         Toast.makeText(context, "Notlara eklendi.", Toast.LENGTH_SHORT).show()
                         selection = null
+                        selectionStartPoint = null
+                        selectionEndPoint = null
+                        handlePreview = null
                     }) {
                         Text("Notlara Ekle")
                     }
@@ -1775,6 +1915,9 @@ private fun PdfPageSurface(
                                 Toast.LENGTH_SHORT
                             ).show()
                             selection = null
+                            selectionStartPoint = null
+                            selectionEndPoint = null
+                            handlePreview = null
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFFFFD83D),
