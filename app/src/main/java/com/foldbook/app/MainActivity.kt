@@ -163,7 +163,10 @@ private fun FoldBookTheme(content: @Composable () -> Unit) {
 
 private data class ReaderPage(
     val chapter: String,
-    val body: String
+    val body: String,
+    val chapterIndex: Int,
+    val startOffset: Int,
+    val endOffset: Int
 )
 
 private data class ReaderPalette(
@@ -222,7 +225,9 @@ private fun EpubBook.toReaderPages(
     pageWidthPx: Int,
     pageHeightPx: Int,
     density: Float,
-    scaledDensity: Float
+    scaledDensity: Float,
+    anchorChapterIndex: Int = -1,
+    anchorCharOffset: Int = -1
 ): List<ReaderPage> {
     if (pageWidthPx <= 0 || pageHeightPx <= 0) return emptyList()
 
@@ -241,44 +246,35 @@ private fun EpubBook.toReaderPages(
     }
     val titleLineHeightPx = (bodySizeSp + 7f) * scaledDensity
 
-    // BookPage iç boşlukları + alttaki sayfa numarası için ayrılan alan.
     val contentWidthPx = (
         pageWidthPx - (64f * density)
     ).toInt().coerceAtLeast(120)
 
-    // StaticLayout satır altlarını gerçek piksel yüksekliğiyle ölçüyor.
-    // Yalnızca küçük Compose/StaticLayout farkı için ince bir güvenlik payı bırakıyoruz.
-    val bottomSafetyPx = (bodyLineHeightPx * 1.0f).toInt()
+    // Compose BasicTextField ile StaticLayout font metrikleri birebir aynı değil.
+    // Bir satır yetmediği için 1.75 tam satırlık güvenlik alanı bırakıyoruz.
+    val bottomSafetyPx = (bodyLineHeightPx * 1.75f).toInt()
 
     val contentHeightPx = (
         pageHeightPx -
-            (28f * density) -      // üst 22dp + alt 6dp sayfa iç boşluğu
-            (20f * density) -      // aşağı alınmış sayfa numarası alanı
-            bottomSafetyPx         // yarım satır görünmesini engelleyen güvenli alan
+            (28f * density) -
+            (20f * density) -
+            bottomSafetyPx
     ).toInt().coerceAtLeast((bodyLineHeightPx * 4f).toInt())
 
+    fun normalizeText(text: String): String {
+        return text
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replace(Regex("[ \\t]+"), " ")
+            .replace(Regex("\\n[ \\t]+"), "\n")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+    }
+
     return buildList {
-        for (chapter in chapters) {
-            val normalized = chapter.text
-                .replace("\r\n", "\n")
-                .replace('\r', '\n')
-                .replace(Regex("[ \\t]+"), " ")
-                .replace(Regex("\\n[ \\t]+"), "\n")
-                .replace(Regex("\\n{3,}"), "\n\n")
-                .trim()
-
-            if (normalized.isBlank()) continue
-
-            // Önceki sürüm her sayfa için metni tekrar tekrar ölçüyordu.
-            // Şimdi bölümün tamamını yalnızca BİR kez layout ediyoruz.
-            val bodyLayout = buildReaderLayout(
-                text = normalized,
-                paint = bodyPaint,
-                widthPx = contentWidthPx,
-                targetLineHeightPx = bodyLineHeightPx
-            )
-
-            if (bodyLayout.lineCount <= 0) continue
+        chapters.forEachIndexed { chapterIndex, chapter ->
+            val normalized = normalizeText(chapter.text)
+            if (normalized.isBlank()) return@forEachIndexed
 
             val titleHeightPx = if (chapter.title.isNotBlank()) {
                 buildReaderLayout(
@@ -291,44 +287,96 @@ private fun EpubBook.toReaderPages(
                 0
             }
 
-            var startLine = 0
-            var firstPage = true
+            fun appendSegment(
+                segment: String,
+                baseOffset: Int,
+                showChapterTitle: Boolean
+            ) {
+                if (segment.isBlank()) return
 
-            while (startLine < bodyLayout.lineCount) {
-                val availableHeight = if (firstPage) {
-                    (contentHeightPx - titleHeightPx)
-                        .coerceAtLeast((bodyLineHeightPx * 3f).toInt())
-                } else {
-                    contentHeightPx
-                }
+                val bodyLayout = buildReaderLayout(
+                    text = segment,
+                    paint = bodyPaint,
+                    widthPx = contentWidthPx,
+                    targetLineHeightPx = bodyLineHeightPx
+                )
+                if (bodyLayout.lineCount <= 0) return
 
-                val pageTop = bodyLayout.getLineTop(startLine)
-                var endLine = startLine
+                var startLine = 0
+                var firstSegmentPage = true
 
-                while (endLine + 1 < bodyLayout.lineCount) {
-                    val nextBottom = bodyLayout.getLineBottom(endLine + 1)
-                    if (nextBottom - pageTop > availableHeight) break
-                    endLine++
-                }
+                while (startLine < bodyLayout.lineCount) {
+                    val availableHeight = if (firstSegmentPage && showChapterTitle) {
+                        (contentHeightPx - titleHeightPx)
+                            .coerceAtLeast((bodyLineHeightPx * 3f).toInt())
+                    } else {
+                        contentHeightPx
+                    }
 
-                val startOffset = bodyLayout.getLineStart(startLine)
-                val endOffset = bodyLayout.getLineEnd(endLine)
+                    val pageTop = bodyLayout.getLineTop(startLine)
+                    var endLine = startLine
 
-                val body = normalized
-                    .substring(startOffset, endOffset)
-                    .trim()
+                    while (endLine + 1 < bodyLayout.lineCount) {
+                        val nextBottom = bodyLayout.getLineBottom(endLine + 1)
+                        if (nextBottom - pageTop > availableHeight) break
+                        endLine++
+                    }
 
-                if (body.isNotBlank()) {
-                    add(
-                        ReaderPage(
-                            chapter = if (firstPage) chapter.title else "",
-                            body = body
+                    val rawStart = bodyLayout.getLineStart(startLine)
+                    val rawEnd = bodyLayout.getLineEnd(endLine)
+                    val rawBody = segment.substring(rawStart, rawEnd)
+
+                    val firstVisible = rawBody.indexOfFirst { !it.isWhitespace() }
+                    val lastVisible = rawBody.indexOfLast { !it.isWhitespace() }
+
+                    if (firstVisible >= 0 && lastVisible >= firstVisible) {
+                        val body = rawBody.substring(firstVisible, lastVisible + 1)
+                        add(
+                            ReaderPage(
+                                chapter = if (firstSegmentPage && showChapterTitle) {
+                                    chapter.title
+                                } else {
+                                    ""
+                                },
+                                body = body,
+                                chapterIndex = chapterIndex,
+                                startOffset = baseOffset + rawStart + firstVisible,
+                                endOffset = baseOffset + rawStart + lastVisible + 1
+                            )
                         )
-                    )
-                    firstPage = false
-                }
+                        firstSegmentPage = false
+                    }
 
-                startLine = endLine + 1
+                    startLine = endLine + 1
+                }
+            }
+
+            val useAnchor =
+                chapterIndex == anchorChapterIndex &&
+                    anchorCharOffset > 0 &&
+                    anchorCharOffset < normalized.length
+
+            if (useAnchor) {
+                // Ekran yönü değişince mevcut sayfanın ilk görünen karakterini
+                // yeni düzenin de ilk karakteri yap. Böylece yatay/dikey geçişte
+                // okuma noktası başka bir paragrafa kaymıyor.
+                val safeAnchor = anchorCharOffset.coerceIn(1, normalized.lastIndex)
+                appendSegment(
+                    segment = normalized.substring(0, safeAnchor),
+                    baseOffset = 0,
+                    showChapterTitle = true
+                )
+                appendSegment(
+                    segment = normalized.substring(safeAnchor),
+                    baseOffset = safeAnchor,
+                    showChapterTitle = false
+                )
+            } else {
+                appendSegment(
+                    segment = normalized,
+                    baseOffset = 0,
+                    showChapterTitle = true
+                )
             }
         }
     }
@@ -1098,7 +1146,7 @@ private fun LibraryScreen(
                             )
 
                             Text(
-                                text = "v0.9.31",
+                                text = "v0.9.32",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                             )
@@ -1391,6 +1439,8 @@ private fun ReaderScreen(
     var ttsMessage by remember { mutableStateOf<String?>(null) }
 
     var currentSpreadIndex by rememberSaveable(bookKey) { mutableIntStateOf(0) }
+    var currentAnchorChapter by rememberSaveable(bookKey) { mutableIntStateOf(-1) }
+    var currentAnchorOffset by rememberSaveable(bookKey) { mutableIntStateOf(-1) }
     var ttsReadPageIndex by rememberSaveable(bookKey) { mutableIntStateOf(0) }
     var ttsCharOffset by rememberSaveable(bookKey) { mutableIntStateOf(0) }
     var ttsSpeakBaseOffset by remember { mutableIntStateOf(0) }
@@ -1507,13 +1557,21 @@ private fun ReaderScreen(
                     density,
                     scaledDensity
                 ) {
+                    // Bu değerler özellikle key değil: normal sayfa çevirmede yeniden
+                    // pagination yapma. Yalnızca ekran ölçüsü değiştiğinde producer
+                    // yeniden başlar ve o andaki okuma noktasını anchor olarak alır.
+                    val reflowAnchorChapter = currentAnchorChapter
+                    val reflowAnchorOffset = currentAnchorOffset
+
                     value = withContext(Dispatchers.Default) {
                         book.toReaderPages(
                             fontSize = fontSize,
                             pageWidthPx = pageWidthPx,
                             pageHeightPx = pageHeightPx,
                             density = density,
-                            scaledDensity = scaledDensity
+                            scaledDensity = scaledDensity,
+                            anchorChapterIndex = reflowAnchorChapter,
+                            anchorCharOffset = reflowAnchorOffset
                         )
                     }
                 }
@@ -1537,14 +1595,44 @@ private fun ReaderScreen(
                             lastPageIndex = pages.lastIndex
                         )
                     }
-                    val savedPage = if (twoPage) {
-                        (savedRawPage - (savedRawPage % 2)).coerceAtLeast(0)
+                    val anchoredPage = if (
+                        currentAnchorChapter >= 0 &&
+                        currentAnchorOffset >= 0
+                    ) {
+                        val exact = pages.indexOfFirst { page ->
+                            page.chapterIndex == currentAnchorChapter &&
+                                page.startOffset == currentAnchorOffset
+                        }
+
+                        if (exact >= 0) {
+                            exact
+                        } else {
+                            pages.indexOfFirst { page ->
+                                page.chapterIndex == currentAnchorChapter &&
+                                    currentAnchorOffset >= page.startOffset &&
+                                    currentAnchorOffset < page.endOffset
+                            }
+                        }
                     } else {
-                        savedRawPage
+                        -1
                     }
 
-                    LaunchedEffect(bookKey, pages.size, twoPage) {
-                        currentSpreadIndex = savedPage.coerceIn(0, pages.lastIndex)
+                    // Çift sayfada tek/çift sayıya zorlamıyoruz. Dikeyde hangi sayfa
+                    // başlıyorsa Fold/yatay modda o sayfa SOL tarafta başlasın.
+                    val savedPage = if (anchoredPage >= 0) {
+                        anchoredPage
+                    } else {
+                        savedRawPage
+                    }.coerceIn(0, pages.lastIndex)
+
+                    LaunchedEffect(bookKey, pages.size, twoPage, savedPage) {
+                        currentSpreadIndex = savedPage
+
+                        pages.getOrNull(savedPage)?.let { page ->
+                            currentAnchorChapter = page.chapterIndex
+                            currentAnchorOffset = page.startOffset
+                        }
+
                         if (!ttsActive) {
                             ttsReadPageIndex = currentSpreadIndex
                             ttsCharOffset = 0
@@ -1678,6 +1766,11 @@ private fun ReaderScreen(
                                 )
 
                                 currentSpreadIndex = pageIndex
+
+                                pages.getOrNull(pageIndex)?.let { page ->
+                                    currentAnchorChapter = page.chapterIndex
+                                    currentAnchorOffset = page.startOffset
+                                }
 
                                 if (ttsActive) {
                                     tts.stop()
@@ -1933,10 +2026,8 @@ private fun BookSpread(
     }
 
     LaunchedEffect(twoPage) {
-        if (twoPage && pageIndex % 2 != 0) {
-            pageIndex = (pageIndex - 1).coerceAtLeast(0)
-        }
-
+        // Tek sayfadan çift sayfaya geçerken mevcut başlangıç sayfasını koru.
+        // Örn. dikeyde 95. sayfadaysak yatayda 95 solda, 96 sağda açılır.
         dragPx = 0f
         dragProgress = 0f
         dragYFraction = 0.5f
