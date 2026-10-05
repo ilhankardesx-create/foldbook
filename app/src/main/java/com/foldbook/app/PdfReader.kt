@@ -1174,6 +1174,7 @@ private fun PdfTwoPageSpread(
                     direction = -1,
                     theme = theme,
                     renderWidthPx = renderWidthPx,
+                    highlights = highlights,
                     crossSpine = true,
                     modifier = Modifier.fillMaxSize().zIndex(4f)
                 )
@@ -1211,6 +1212,7 @@ private fun PdfTwoPageSpread(
                     direction = 1,
                     theme = theme,
                     renderWidthPx = renderWidthPx,
+                    highlights = highlights,
                     crossSpine = true,
                     modifier = Modifier.fillMaxSize().zIndex(4f)
                 )
@@ -1328,6 +1330,7 @@ private fun PdfSinglePageSpread(
                 direction = turnDirection,
                 theme = theme,
                 renderWidthPx = renderWidthPx,
+                highlights = highlights,
                 modifier = Modifier.fillMaxSize().zIndex(4f)
             )
         }
@@ -1342,6 +1345,7 @@ private fun PdfSingleTurningPage(
     direction: Int,
     theme: ReaderThemeOption,
     renderWidthPx: Int,
+    highlights: List<BookHighlight>,
     modifier: Modifier = Modifier
 ) {
     val p = progress.coerceIn(0f, 1f)
@@ -1365,10 +1369,13 @@ private fun PdfSingleTurningPage(
         }
     ) {
         PdfFrozenPage(
+            document = document,
             bitmap = bitmap,
             index = frontIndex,
             totalPages = document.pageCount,
             theme = theme,
+            renderWidthPx = renderWidthPx,
+            highlights = highlights,
             modifier = Modifier.fillMaxSize()
         )
         Box(
@@ -1390,6 +1397,7 @@ private fun PdfTurningPage(
     direction: Int,
     theme: ReaderThemeOption,
     renderWidthPx: Int,
+    highlights: List<BookHighlight>,
     cameraDistanceValue: Float = 30f,
     crossSpine: Boolean = false,
     modifier: Modifier = Modifier
@@ -1443,10 +1451,13 @@ private fun PdfTurningPage(
                 }
         ) {
             PdfFrozenPage(
+                document = document,
                 bitmap = if (showingBack) backBitmap else frontBitmap,
                 index = if (showingBack) backIndex else frontIndex,
                 totalPages = document.pageCount,
                 theme = theme,
+                renderWidthPx = renderWidthPx,
+                highlights = highlights,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -1464,12 +1475,145 @@ private fun PdfTurningPage(
     }
 }
 
+
+@Composable
+private fun PdfFrozenHighlightOverlay(
+    document: PdfBookDocument,
+    bitmap: Bitmap?,
+    index: Int?,
+    theme: ReaderThemeOption,
+    renderWidthPx: Int,
+    highlights: List<BookHighlight>,
+    modifier: Modifier = Modifier
+) {
+    if (bitmap == null || index == null || index !in 0 until document.pageCount) return
+
+    val densityInfo = LocalDensity.current
+    val geometry = document.cachedGeometry(index, renderWidthPx, theme)
+    var boxSize by remember(index, bitmap) { mutableStateOf(IntSize.Zero) }
+    val imagePaddingPx = with(densityInfo) { 2.dp.toPx() }
+
+    val pageHighlights = remember(index, highlights) {
+        highlights.filter { it.pageNumber == index + 1 }
+    }
+
+    val savedHighlightBounds by produceState(
+        initialValue = emptyList<RectF>(),
+        key1 = index,
+        key2 = pageHighlights.hashCode(),
+        key3 = document.supportsTextSelection
+    ) {
+        value = if (document.supportsTextSelection && pageHighlights.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                pageHighlights.flatMap { highlight ->
+                    if (highlight.bounds.isNotEmpty()) {
+                        highlight.bounds.map { bound ->
+                            RectF(bound.left, bound.top, bound.right, bound.bottom)
+                        }
+                    } else {
+                        document.selectByIndices(
+                            index = index,
+                            startIndex = highlight.startOffset,
+                            endIndex = highlight.endOffset
+                        )?.bounds.orEmpty()
+                    }
+                }
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    fun imageMetrics(): FloatArray? {
+        if (boxSize.width <= 0 || boxSize.height <= 0) return null
+        val innerWidth = (boxSize.width - imagePaddingPx * 2f).coerceAtLeast(1f)
+        val innerHeight = (boxSize.height - imagePaddingPx * 2f).coerceAtLeast(1f)
+        val scale = min(
+            innerWidth / bitmap.width.toFloat(),
+            innerHeight / bitmap.height.toFloat()
+        ).coerceAtLeast(0.0001f)
+        val shownWidth = bitmap.width * scale
+        val shownHeight = bitmap.height * scale
+        val left = (boxSize.width - shownWidth) / 2f
+        val top = (boxSize.height - shownHeight) / 2f
+        return floatArrayOf(scale, left, top)
+    }
+
+    fun toDisplayRect(rect: RectF): RectF? {
+        val g = geometry ?: return null
+        val m = imageMetrics() ?: return null
+        val scale = m[0]
+        val imageLeft = m[1]
+        val imageTop = m[2]
+        fun x(value: Float): Float {
+            val source = value / g.pageWidthPoints * g.sourceWidthPx
+            return imageLeft + (source - g.cropLeftPx) * scale
+        }
+        fun y(value: Float): Float {
+            val source = value / g.pageHeightPoints * g.sourceHeightPx
+            return imageTop + (source - g.cropTopPx) * scale
+        }
+        return RectF(x(rect.left), y(rect.top), x(rect.right), y(rect.bottom))
+    }
+
+    Box(modifier = modifier.onSizeChanged { boxSize = it }) {
+        ComposeCanvas(modifier = Modifier.fillMaxSize()) {
+            val markerColor = when (theme) {
+                ReaderThemeOption.LIGHT -> Color(0xFFDFFF3F).copy(alpha = 0.60f)
+                ReaderThemeOption.SEPIA -> Color(0xFFD8F23B).copy(alpha = 0.54f)
+                ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)
+            }
+            val markerSheen = when (theme) {
+                ReaderThemeOption.LIGHT -> Color(0xFFE9FF64).copy(alpha = 0.24f)
+                ReaderThemeOption.SEPIA -> Color(0xFFE6F75C).copy(alpha = 0.20f)
+                ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)
+            }
+            val markerBleed = 1.8.dp.toPx()
+            val markerRadius = 2.8.dp.toPx()
+
+            savedHighlightBounds.forEach { rect ->
+                toDisplayRect(rect)?.let { shown ->
+                    val lineHeight = (shown.bottom - shown.top).coerceAtLeast(1f)
+                    val markerTop = shown.top + lineHeight * 0.04f
+                    val markerBottom = shown.bottom - lineHeight * 0.02f
+                    val markerHeight = (markerBottom - markerTop).coerceAtLeast(1f)
+                    val markerWidth =
+                        (shown.right - shown.left + markerBleed * 2f).coerceAtLeast(1f)
+
+                    drawRoundRect(
+                        color = markerColor,
+                        topLeft = Offset(shown.left - markerBleed, markerTop),
+                        size = Size(markerWidth, markerHeight),
+                        cornerRadius = CornerRadius(markerRadius, markerRadius)
+                    )
+                    drawRoundRect(
+                        color = markerSheen,
+                        topLeft = Offset(
+                            shown.left - markerBleed * 0.45f,
+                            markerTop + lineHeight * 0.17f
+                        ),
+                        size = Size(
+                            (shown.right - shown.left + markerBleed * 0.9f)
+                                .coerceAtLeast(1f),
+                            (markerHeight * 0.56f).coerceAtLeast(1f)
+                        ),
+                        cornerRadius = CornerRadius(markerRadius, markerRadius)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun PdfFrozenPage(
+    document: PdfBookDocument,
     bitmap: Bitmap?,
     index: Int?,
     totalPages: Int,
     theme: ReaderThemeOption,
+    renderWidthPx: Int,
+    highlights: List<BookHighlight>,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -1494,6 +1638,17 @@ private fun PdfFrozenPage(
                     contentScale = ContentScale.Fit
                 )
             }
+
+            PdfFrozenHighlightOverlay(
+                document = document,
+                bitmap = bitmap,
+                index = index,
+                theme = theme,
+                renderWidthPx = renderWidthPx,
+                highlights = highlights,
+                modifier = Modifier.fillMaxSize()
+            )
+
             if (index != null) {
                 Text(
                     text = if (totalPages > 0) "${index + 1} / $totalPages" else (index + 1).toString(),
