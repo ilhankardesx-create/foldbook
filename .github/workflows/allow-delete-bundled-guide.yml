@@ -1,0 +1,31 @@
+name: Allow Delete Bundled Guide
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/allow-delete-bundled-guide.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Allow bundled guide deletion
+        run: python3 scripts/allow_delete_bundled_guide.py
+
+      - name: Commit deletion support
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/BundledGuide.kt app/src/main/java/com/foldbook/app/MainActivity.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Allow deleting bundled guide from library"
+          git push origin development
