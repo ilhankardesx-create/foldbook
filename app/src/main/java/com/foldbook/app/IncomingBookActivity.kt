@@ -1,45 +1,38 @@
 package com.foldbook.app
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.documentfile.provider.DocumentFile
 import java.util.concurrent.Executors
 
 /** Receives "Open with FoldBook" intents for PDF/EPUB files. */
-class IncomingBookActivity : ComponentActivity() {
+class IncomingBookActivity : Activity() {
+
+    companion object {
+        private const val REQUEST_FOLDER = 4107
+        private const val STATE_PENDING_URI = "pending_book_uri"
+        private const val STATE_PENDING_MIME = "pending_book_mime"
+    }
 
     private var pendingBookUri: Uri? = null
     private var pendingMimeType: String? = null
     private val ioExecutor = Executors.newSingleThreadExecutor()
 
-    private val folderPicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { folderUri ->
-        if (folderUri == null) {
-            finish()
-            return@registerForActivityResult
-        }
-
-        runCatching {
-            contentResolver.takePersistableUriPermission(
-                folderUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        }
-        LibraryStore.saveFolder(this, folderUri)
-        importPendingBook(folderUri)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        pendingBookUri = intent?.data
-        pendingMimeType = intent?.type
+        pendingBookUri = savedInstanceState
+            ?.getString(STATE_PENDING_URI)
+            ?.takeIf { it.isNotBlank() }
+            ?.let(Uri::parse)
+            ?: intent?.data
+        pendingMimeType = savedInstanceState
+            ?.getString(STATE_PENDING_MIME)
+            ?: intent?.type
 
         val incoming = pendingBookUri
         if (intent?.action != Intent.ACTION_VIEW || incoming == null) {
@@ -56,15 +49,59 @@ class IncomingBookActivity : ComponentActivity() {
                 "Kitabı rafa eklemek için önce FoldBook klasörünü seç.",
                 Toast.LENGTH_LONG
             ).show()
-            folderPicker.launch(null)
+            launchFolderPicker()
         } else {
             importPendingBook(selectedFolder)
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        pendingBookUri?.let { outState.putString(STATE_PENDING_URI, it.toString()) }
+        pendingMimeType?.let { outState.putString(STATE_PENDING_MIME, it) }
+        super.onSaveInstanceState(outState)
+    }
+
+    @Deprecated("Uses the platform result callback for ACTION_OPEN_DOCUMENT_TREE.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode != REQUEST_FOLDER) return
+        if (resultCode != RESULT_OK) {
+            finish()
+            return
+        }
+
+        val folderUri = data?.data ?: run {
+            finish()
+            return
+        }
+
+        val takeFlags = data.flags and
+            (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        runCatching {
+            contentResolver.takePersistableUriPermission(folderUri, takeFlags)
+        }
+
+        LibraryStore.saveFolder(this, folderUri)
+        importPendingBook(folderUri)
+    }
+
     override fun onDestroy() {
         ioExecutor.shutdown()
         super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun launchFolderPicker() {
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+            )
+        }
+        startActivityForResult(picker, REQUEST_FOLDER)
     }
 
     private fun importPendingBook(folderUri: Uri) {
