@@ -4,38 +4,34 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.pow
+import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.sin
 
-private data class CurlGeometry(
-    val front: Path,
-    val fold: Path,
-    val seam: Path
-)
-
 /**
- * A paper-like page curl layer.
+ * FoldBook page curl renderer.
  *
- * Unlike the old whole-page rotationY flip, only the folded portion is transformed.
- * The visible front is clipped by a curved seam, the back face is rendered separately,
- * and on a two-page spread that folded sheet travels across the book spine.
+ * The previous implementation mirrored and translated a complete page composable,
+ * which made text appear as a huge reversed column during the turn. This renderer
+ * captures the two page faces once and draws the sheet in three physical regions:
+ *
+ * 1. the flat, not-yet-turned face,
+ * 2. a narrow cylindrical curl band,
+ * 3. the already-turned reverse face.
+ *
+ * Only the curl band is sliced. The rest of the sheet is drawn once, so text does
+ * not duplicate or stack while the page is moving.
  */
 @Composable
 internal fun PageCurl(
@@ -49,22 +45,18 @@ internal fun PageCurl(
 ) {
     val p = progress.coerceIn(0f, 1f)
     val safeDirection = if (direction < 0) -1 else 1
-    val touchY = touchYFraction.coerceIn(0.05f, 0.95f)
+    val touchY = touchYFraction.coerceIn(0.08f, 0.92f)
 
-    var widthPx by remember { mutableFloatStateOf(1f) }
+    val frontLayer = rememberGraphicsLayer()
+    val backLayer = rememberGraphicsLayer()
 
-    Box(
-        modifier = modifier.onSizeChanged {
-            widthPx = it.width.toFloat().coerceAtLeast(1f)
-        }
-    ) {
-        // Front face: the still-flat part of the sheet.
+    Box(modifier = modifier) {
+        // Record the current front face without drawing it directly.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .drawWithContent {
-                    val geometry = curlGeometry(size, p, safeDirection, touchY)
-                    clipPath(geometry.front) {
+                    frontLayer.record {
                         this@drawWithContent.drawContent()
                     }
                 }
@@ -72,178 +64,241 @@ internal fun PageCurl(
             front()
         }
 
-        // Folded back face. It is mirrored like the reverse side of a real sheet.
-        val crossAmount = if (crossSpine) {
-            p.pow(1.08f)
-        } else {
-            0f
-        }
-        val translation = when (safeDirection) {
-            1 -> -widthPx * crossAmount
-            else -> widthPx * crossAmount
-        }
-        val lean = (touchY - 0.5f) * 9f * sin((PI * p).toFloat())
-        val squash = 1f - 0.035f * sin((PI * p).toFloat())
-
+        // Record the reverse face separately. It is used only once the paper has
+        // actually passed the midpoint of the curl.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    translationX = translation
-                    rotationZ = if (safeDirection == 1) -lean else lean
-                    scaleY = squash
-                    transformOrigin = TransformOrigin(
-                        pivotFractionX = if (safeDirection == 1) 0f else 1f,
-                        pivotFractionY = touchY
-                    )
-                }
                 .drawWithContent {
-                    val geometry = curlGeometry(size, p, safeDirection, touchY)
-                    clipPath(geometry.fold) {
+                    backLayer.record {
                         this@drawWithContent.drawContent()
-
-                        // Paper depth: a soft dark edge plus a faint reflected highlight.
-                        val shadowStrength = 0.09f +
-                            0.18f * sin((PI * p).toFloat()).coerceAtLeast(0f)
-                        val brush = if (safeDirection == 1) {
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = shadowStrength),
-                                    Color.Transparent,
-                                    Color.White.copy(alpha = 0.055f)
-                                )
-                            )
-                        } else {
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = 0.055f),
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = shadowStrength)
-                                )
-                            )
-                        }
-                        drawRect(brush = brush)
                     }
                 }
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = -1f
-                        alpha = 0.985f
+            back()
+        }
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width.coerceAtLeast(1f)
+            val height = size.height.coerceAtLeast(1f)
+
+            if (p <= 0.001f) {
+                drawLayer(frontLayer)
+                return@Canvas
+            }
+
+            // At the beginning and end the curl radius collapses. In the middle a
+            // small band remains rounded while the rest of the sheet lies flat.
+            val wave = sin((PI * p).toFloat()).coerceAtLeast(0f)
+            val turnedLength = width * p
+            val bandWidth = min(
+                turnedLength,
+                width * 0.16f * wave
+            ).coerceAtLeast(width * 0.004f)
+
+            val stripCount = 12
+            val paperTint = Color.White.copy(alpha = 0.045f)
+            val fingerBias = (touchY - 0.5f) * 0.18f
+
+            if (safeDirection == 1) {
+                // RIGHT page -> LEFT. The crease travels from the outer edge to spine.
+                val crease = width * (1f - p)
+                val bendEnd = (crease + bandWidth).coerceAtMost(width)
+
+                // Flat front section.
+                if (crease > 0f) {
+                    clipRect(0f, 0f, (crease + 1f).coerceAtMost(width), height) {
+                        drawLayer(frontLayer)
                     }
-            ) {
-                back()
+                }
+
+                // Already turned reverse side. Reflect around the end of the curl
+                // band so it naturally crosses the spine instead of being translated
+                // as one giant mirrored page.
+                if (bendEnd < width) {
+                    val pivotX = crease + bandWidth / 2f
+                    scale(
+                        scaleX = -1f,
+                        scaleY = 1f,
+                        pivot = Offset(pivotX, height * touchY)
+                    ) {
+                        clipRect(bendEnd, 0f, width, height) {
+                            drawLayer(backLayer)
+                            drawRect(
+                                color = paperTint,
+                                topLeft = Offset(bendEnd, 0f),
+                                size = Size(width - bendEnd, height)
+                            )
+                        }
+                    }
+                }
+
+                // Cylindrical bend. Only this narrow region is split into strips.
+                if (bandWidth > 1f) {
+                    repeat(stripCount) { i ->
+                        val sourceLeft = crease + bandWidth * i / stripCount
+                        val sourceRight = crease + bandWidth * (i + 1) / stripCount
+                        if (sourceLeft >= width) return@repeat
+
+                        val left = sourceLeft.coerceIn(0f, width)
+                        val right = sourceRight.coerceIn(0f, width)
+                        val sourceMid = (left + right) / 2f
+                        val s = (sourceMid - crease).coerceIn(0f, bandWidth)
+                        val local = (s / bandWidth).coerceIn(0f, 1f)
+                        val angle = PI.toFloat() * local
+                        val cosine = cos(angle)
+
+                        // Integral of cos(theta) gives a continuous cylindrical arc.
+                        var mappedMid = crease +
+                            (bandWidth / PI.toFloat()) * sin(angle)
+                        mappedMid += fingerBias * bandWidth * sin(angle)
+
+                        val projection = abs(cosine).coerceAtLeast(0.055f)
+                        val translation = mappedMid - sourceMid
+
+                        withTransform({ translate(left = translation, top = 0f) }) {
+                            scale(
+                                scaleX = projection,
+                                scaleY = 1f,
+                                pivot = Offset(sourceMid, height * touchY)
+                            ) {
+                                clipRect(left - 1.5f, 0f, right + 1.5f, height) {
+                                    if (cosine >= 0f) {
+                                        drawLayer(frontLayer)
+                                    } else {
+                                        // Two mirrors cancel: the reverse page is readable
+                                        // when the physical sheet reaches the opposite side.
+                                        scale(
+                                            scaleX = -1f,
+                                            scaleY = 1f,
+                                            pivot = Offset(sourceMid, height * touchY)
+                                        ) {
+                                            drawLayer(backLayer)
+                                        }
+                                    }
+
+                                    val shade = (0.04f + 0.17f * sin(angle).coerceAtLeast(0f))
+                                        .coerceIn(0f, 0.20f)
+                                    drawRect(
+                                        color = Color.Black.copy(alpha = shade),
+                                        topLeft = Offset(left, 0f),
+                                        size = Size((right - left).coerceAtLeast(1f), height)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val seamAlpha = (0.08f + 0.14f * wave).coerceAtMost(0.22f)
+                drawLine(
+                    color = Color.Black.copy(alpha = seamAlpha),
+                    start = Offset(crease.coerceIn(0f, width), 0f),
+                    end = Offset(crease.coerceIn(0f, width), height),
+                    strokeWidth = (3f + 7f * wave)
+                )
+                drawLine(
+                    color = Color.White.copy(alpha = 0.10f * wave),
+                    start = Offset((crease + 2f).coerceIn(0f, width), 0f),
+                    end = Offset((crease + 2f).coerceIn(0f, width), height),
+                    strokeWidth = 1.5f
+                )
+            } else {
+                // LEFT page -> RIGHT. Mirror of the forward geometry.
+                val crease = width * p
+                val bendStart = (crease - bandWidth).coerceAtLeast(0f)
+
+                if (crease < width) {
+                    clipRect((crease - 1f).coerceAtLeast(0f), 0f, width, height) {
+                        drawLayer(frontLayer)
+                    }
+                }
+
+                if (bendStart > 0f) {
+                    val pivotX = crease - bandWidth / 2f
+                    scale(
+                        scaleX = -1f,
+                        scaleY = 1f,
+                        pivot = Offset(pivotX, height * touchY)
+                    ) {
+                        clipRect(0f, 0f, bendStart, height) {
+                            drawLayer(backLayer)
+                            drawRect(
+                                color = paperTint,
+                                topLeft = Offset.Zero,
+                                size = Size(bendStart, height)
+                            )
+                        }
+                    }
+                }
+
+                if (bandWidth > 1f) {
+                    repeat(stripCount) { i ->
+                        val sourceRight = crease - bandWidth * i / stripCount
+                        val sourceLeft = crease - bandWidth * (i + 1) / stripCount
+                        if (sourceRight <= 0f) return@repeat
+
+                        val left = sourceLeft.coerceIn(0f, width)
+                        val right = sourceRight.coerceIn(0f, width)
+                        val sourceMid = (left + right) / 2f
+                        val s = (crease - sourceMid).coerceIn(0f, bandWidth)
+                        val local = (s / bandWidth).coerceIn(0f, 1f)
+                        val angle = PI.toFloat() * local
+                        val cosine = cos(angle)
+
+                        var mappedMid = crease -
+                            (bandWidth / PI.toFloat()) * sin(angle)
+                        mappedMid -= fingerBias * bandWidth * sin(angle)
+
+                        val projection = abs(cosine).coerceAtLeast(0.055f)
+                        val translation = mappedMid - sourceMid
+
+                        withTransform({ translate(left = translation, top = 0f) }) {
+                            scale(
+                                scaleX = projection,
+                                scaleY = 1f,
+                                pivot = Offset(sourceMid, height * touchY)
+                            ) {
+                                clipRect(left - 1.5f, 0f, right + 1.5f, height) {
+                                    if (cosine >= 0f) {
+                                        drawLayer(frontLayer)
+                                    } else {
+                                        scale(
+                                            scaleX = -1f,
+                                            scaleY = 1f,
+                                            pivot = Offset(sourceMid, height * touchY)
+                                        ) {
+                                            drawLayer(backLayer)
+                                        }
+                                    }
+
+                                    val shade = (0.04f + 0.17f * sin(angle).coerceAtLeast(0f))
+                                        .coerceIn(0f, 0.20f)
+                                    drawRect(
+                                        color = Color.Black.copy(alpha = shade),
+                                        topLeft = Offset(left, 0f),
+                                        size = Size((right - left).coerceAtLeast(1f), height)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val seamAlpha = (0.08f + 0.14f * wave).coerceAtMost(0.22f)
+                drawLine(
+                    color = Color.Black.copy(alpha = seamAlpha),
+                    start = Offset(crease.coerceIn(0f, width), 0f),
+                    end = Offset(crease.coerceIn(0f, width), height),
+                    strokeWidth = (3f + 7f * wave)
+                )
+                drawLine(
+                    color = Color.White.copy(alpha = 0.10f * wave),
+                    start = Offset((crease - 2f).coerceIn(0f, width), 0f),
+                    end = Offset((crease - 2f).coerceIn(0f, width), height),
+                    strokeWidth = 1.5f
+                )
             }
         }
-
-        // Dynamic seam and cast shadow. Several soft strokes give the fold thickness
-        // without the old bright flash/glare.
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            if (p <= 0.001f || p >= 0.999f) return@Canvas
-            val geometry = curlGeometry(size, p, safeDirection, touchY)
-            val peak = sin((PI * p).toFloat()).coerceAtLeast(0f)
-
-            drawPath(
-                path = geometry.seam,
-                color = Color.Black.copy(alpha = 0.055f * peak),
-                style = Stroke(width = 28f)
-            )
-            drawPath(
-                path = geometry.seam,
-                color = Color.Black.copy(alpha = 0.13f * peak),
-                style = Stroke(width = 11f)
-            )
-            drawPath(
-                path = geometry.seam,
-                color = Color.White.copy(alpha = 0.12f * peak),
-                style = Stroke(width = 2.2f)
-            )
-        }
     }
-}
-
-private fun curlGeometry(
-    size: Size,
-    progress: Float,
-    direction: Int,
-    touchYFraction: Float
-): CurlGeometry {
-    val width = size.width.coerceAtLeast(1f)
-    val height = size.height.coerceAtLeast(1f)
-    val p = progress.coerceIn(0f, 1f)
-    val touchY = height * touchYFraction.coerceIn(0.05f, 0.95f)
-    val wave = sin((PI * p).toFloat()).coerceAtLeast(0f)
-
-    // The seam moves from the outer edge toward the spine while bowing toward the
-    // user's finger. At the beginning/end the bow naturally collapses to zero.
-    val baseX = if (direction == 1) {
-        width * (1f - p)
-    } else {
-        width * p
-    }
-    val bend = width * 0.24f * wave
-    val upperWeight = (1f - touchYFraction).coerceIn(0f, 1f)
-    val lowerWeight = touchYFraction.coerceIn(0f, 1f)
-    val sign = if (direction == 1) -1f else 1f
-
-    val topX = (baseX - sign * bend * (0.10f + upperWeight * 0.25f))
-        .coerceIn(0f, width)
-    val bottomX = (baseX - sign * bend * (0.10f + lowerWeight * 0.25f))
-        .coerceIn(0f, width)
-    val controlX = (baseX + sign * bend).coerceIn(-width * 0.18f, width * 1.18f)
-    val controlY1 = (touchY * 0.48f).coerceIn(0f, height)
-    val controlY2 = (touchY + (height - touchY) * 0.56f).coerceIn(0f, height)
-
-    val seam = Path().apply {
-        moveTo(topX, 0f)
-        cubicTo(
-            controlX,
-            controlY1,
-            controlX,
-            controlY2,
-            bottomX,
-            height
-        )
-    }
-
-    val front = Path()
-    val fold = Path()
-
-    if (direction == 1) {
-        front.apply {
-            moveTo(0f, 0f)
-            lineTo(topX, 0f)
-            cubicTo(controlX, controlY1, controlX, controlY2, bottomX, height)
-            lineTo(0f, height)
-            close()
-        }
-        fold.apply {
-            moveTo(topX, 0f)
-            lineTo(width, 0f)
-            lineTo(width, height)
-            lineTo(bottomX, height)
-            cubicTo(controlX, controlY2, controlX, controlY1, topX, 0f)
-            close()
-        }
-    } else {
-        front.apply {
-            moveTo(topX, 0f)
-            lineTo(width, 0f)
-            lineTo(width, height)
-            lineTo(bottomX, height)
-            cubicTo(controlX, controlY2, controlX, controlY1, topX, 0f)
-            close()
-        }
-        fold.apply {
-            moveTo(0f, 0f)
-            lineTo(topX, 0f)
-            cubicTo(controlX, controlY1, controlX, controlY2, bottomX, height)
-            lineTo(0f, height)
-            close()
-        }
-    }
-
-    return CurlGeometry(front = front, fold = fold, seam = seam)
 }
