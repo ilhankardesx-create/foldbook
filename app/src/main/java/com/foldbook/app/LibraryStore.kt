@@ -58,7 +58,6 @@ object LibraryStore {
     private const val KEY_FAVORITES = "favorite_book_uris"
     private const val KEY_NOTES_JSON = "book_notes_json"
     private const val KEY_HIGHLIGHTS_JSON = "book_highlights_json"
-    private const val DEVICE_LIBRARY_URI = "foldbook://device-library"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -71,11 +70,9 @@ object LibraryStore {
         val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_FOLDER_URI, null)
 
-        return if (value.isNullOrBlank()) {
-            Uri.parse(DEVICE_LIBRARY_URI)
-        } else {
-            runCatching { Uri.parse(value) }.getOrElse { Uri.parse(DEVICE_LIBRARY_URI) }
-        }
+        return value
+            ?.takeIf { it.isNotBlank() }
+            ?.let { runCatching { Uri.parse(it) }.getOrNull() }
     }
 
     fun saveActiveBook(context: Context, book: LibraryBook) {
@@ -586,8 +583,6 @@ object LibraryStore {
             }
             collectBooks(root, result)
         }
-
-        result += DeviceBookScanner.scan(context)
 
         return result
             .distinctBy { book ->
