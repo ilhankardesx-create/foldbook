@@ -1,0 +1,81 @@
+name: Fix Curl Contact
+
+on:
+  push:
+    branches: [ "development" ]
+    paths: [ ".github/workflows/fix-curl-contact.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+
+      - name: Fix curl touch direction and live-page handoff
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"{label} not found")
+              return text.replace(old, new, 1)
+
+          # 1) Finger height: bottom touch must make the lower edge lead the curl,
+          #    top touch must make the upper edge lead it. Only invert the fold tilt;
+          #    keep the rest of the approved curl geometry untouched.
+          curl = Path('app/src/main/java/com/foldbook/app/PageCurl.kt')
+          s = curl.read_text()
+          s = replace_once(
+              s,
+              '                val tilt = (touchY - 0.5f) * 0.58f * wave',
+              '                val tilt = -(touchY - 0.5f) * 0.58f * wave',
+              'curl vertical tilt'
+          )
+          curl.write_text(s)
+
+          # 2) EPUB back side must render with exactly the same text renderer and
+          #    opacity as the live page. Text -> BasicTextField differences caused
+          #    the visible brightness/attachment pop at the end of a turn.
+          main = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          s = main.read_text()
+          old = '''                if (isBackSide) {
+                    Text(
+                        text = highlightedBody,
+                        fontSize = bodySize.sp,
+                        lineHeight = (bodySize + 11f).sp,
+                        fontFamily = FontFamily.Serif,
+                        color = palette.text.copy(alpha = 0.88f)
+                    )
+                } else {
+'''
+          new = '''                if (isBackSide) {
+                    BasicTextField(
+                        value = TextFieldValue(annotatedString = highlightedBody),
+                        onValueChange = {},
+                        modifier = Modifier.fillMaxSize(),
+                        readOnly = true,
+                        textStyle = TextStyle(
+                            fontSize = bodySize.sp,
+                            lineHeight = (bodySize + 11f).sp,
+                            fontFamily = FontFamily.Serif,
+                            color = palette.text
+                        )
+                    )
+                } else {
+'''
+          s = replace_once(s, old, new, 'EPUB backside renderer')
+          main.write_text(s)
+          PY
+
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/PageCurl.kt \
+                  app/src/main/java/com/foldbook/app/MainActivity.kt
+          git commit -m "Fix curl touch direction and handoff tone"
+          git push origin HEAD:development
