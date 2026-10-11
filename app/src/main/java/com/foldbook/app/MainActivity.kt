@@ -2415,6 +2415,7 @@ private fun SinglePageSpread(
     }
 }
 
+@Suppress("UNUSED_PARAMETER")
 @Composable
 private fun TurningPage(
     frontPage: ReaderPage?,
@@ -2428,88 +2429,27 @@ private fun TurningPage(
     cameraDistanceValue: Float = 30f,
     modifier: Modifier = Modifier
 ) {
-    val p = progress.coerceIn(0f, 1f)
-    val showingBack = p > 0.5f
-    val rotation = if (direction == 1) -180f * p else 180f * p
-    val spineShiftPx = if (crossSpine) {
-        with(LocalDensity.current) { 10.dp.toPx() } * p
-    } else {
-        0f
-    }
-    val origin = if (direction == 1) {
-        TransformOrigin(0f, 0.5f)
-    } else {
-        TransformOrigin(1f, 0.5f)
-    }
-
-    Box(
-        modifier = modifier.graphicsLayer {
-            transformOrigin = origin
-            rotationY = rotation
-            translationX = when {
-                !crossSpine -> 0f
-                direction == 1 -> -spineShiftPx
-                else -> spineShiftPx
-            }
-            cameraDistance = cameraDistanceValue
-            shadowElevation = 18f * (1f - abs(0.5f - p) * 2f)
-            scaleY = 1f
-        }
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    if (showingBack) scaleX = -1f
-                }
-        ) {
-            if (showingBack && backPage != null) {
-                BookPage(
-                    page = backPage,
-                    pageNumber = backNumber,
-                    isBackSide = false,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                BookPage(
-                    page = frontPage,
-                    pageNumber = frontNumber,
-                    isBackSide = false,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            PageEdgeShadow(
-                direction = direction,
-                progress = p
+    PageCurl(
+        progress = progress,
+        direction = direction,
+        touchYFraction = curlY,
+        crossSpine = crossSpine,
+        modifier = modifier,
+        front = {
+            BookPage(
+                page = frontPage,
+                pageNumber = frontNumber,
+                modifier = Modifier.fillMaxSize()
+            )
+        },
+        back = {
+            BookPage(
+                page = backPage ?: frontPage,
+                pageNumber = if (backPage != null) backNumber else frontNumber,
+                isBackSide = true,
+                modifier = Modifier.fillMaxSize()
             )
         }
-    }
-}
-
-@Composable
-private fun BoxScope.PageEdgeShadow(
-    direction: Int,
-    progress: Float
-) {
-    val strength = (1f - abs(0.5f - progress) * 2f).coerceIn(0f, 1f)
-    val dark = Color.Black.copy(alpha = 0.18f * strength)
-    val clear = Color.Transparent
-
-    Box(
-        modifier = Modifier
-            .fillMaxHeight()
-            .width(26.dp)
-            .align(if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd)
-            .background(
-                Brush.horizontalGradient(
-                    colors = if (direction == 1) {
-                        listOf(dark, clear)
-                    } else {
-                        listOf(clear, dark)
-                    }
-                )
-            )
     )
 }
 

@@ -27,7 +27,7 @@ import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -830,8 +830,10 @@ private fun PdfSpread(
     }
     var dragPx by remember { mutableFloatStateOf(0f) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
+    var dragYFraction by remember { mutableFloatStateOf(0.68f) }
     var turnDirection by remember { mutableIntStateOf(0) }
     var pageWidthPx by remember { mutableFloatStateOf(900f) }
+    var pageHeightPx by remember { mutableFloatStateOf(1200f) }
     var settling by remember { mutableStateOf(false) }
 
     val settleAnimation = remember { Animatable(0f) }
@@ -961,6 +963,7 @@ private fun PdfSpread(
         turnDirection = 1
         dragPx = -pageWidthPx
         dragProgress = 0f
+        dragYFraction = 0.68f
         settleAnimation.snapTo(0f)
         settleAnimation.animateTo(
             targetValue = if (twoPage) 0.985f else 1f,
@@ -1015,18 +1018,21 @@ private fun PdfSpread(
             } else {
                 it.width.toFloat().coerceAtLeast(1f)
             }
+            pageHeightPx = it.height.toFloat().coerceAtLeast(1f)
         }
-        .pointerInput(pageIndex, twoPage, pageWidthPx, settling) {
+        .pointerInput(pageIndex, twoPage, pageWidthPx, pageHeightPx, settling) {
             if (settling) return@pointerInput
-            detectHorizontalDragGestures(
-                onDragStart = {
+            detectDragGestures(
+                onDragStart = { startOffset ->
                     dragPx = 0f
                     dragProgress = 0f
+                    dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)
                     turnDirection = 0
                 },
-                onHorizontalDrag = { change, dragAmount ->
+                onDrag = { change, dragAmount ->
                     change.consume()
-                    val proposed = (dragPx + dragAmount)
+                    dragYFraction = (change.position.y / pageHeightPx).coerceIn(0.06f, 0.94f)
+                    val proposed = (dragPx + dragAmount.x)
                         .coerceIn(-pageWidthPx, pageWidthPx)
                     val direction = when {
                         proposed < 0f -> 1
@@ -1102,6 +1108,7 @@ private fun PdfSpread(
                 pageIndex = pageIndex,
                 turnDirection = turnDirection,
                 progress = progress,
+                curlY = dragYFraction,
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
@@ -1115,6 +1122,7 @@ private fun PdfSpread(
                 pageIndex = pageIndex,
                 turnDirection = turnDirection,
                 progress = progress,
+                curlY = dragYFraction,
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
@@ -1132,6 +1140,7 @@ private fun PdfTwoPageSpread(
     pageIndex: Int,
     turnDirection: Int,
     progress: Float,
+    curlY: Float,
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
@@ -1172,6 +1181,7 @@ private fun PdfTwoPageSpread(
                     backIndex = pageIndex - 1,
                     progress = progress,
                     direction = -1,
+                    curlY = curlY,
                     theme = theme,
                     renderWidthPx = renderWidthPx,
                     highlights = highlights,
@@ -1210,6 +1220,7 @@ private fun PdfTwoPageSpread(
                     backIndex = pageIndex + 2,
                     progress = progress,
                     direction = 1,
+                    curlY = curlY,
                     theme = theme,
                     renderWidthPx = renderWidthPx,
                     highlights = highlights,
@@ -1293,6 +1304,7 @@ private fun PdfSinglePageSpread(
     pageIndex: Int,
     turnDirection: Int,
     progress: Float,
+    curlY: Float,
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
@@ -1328,6 +1340,7 @@ private fun PdfSinglePageSpread(
                 frontIndex = pageIndex,
                 progress = progress,
                 direction = turnDirection,
+                curlY = curlY,
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
@@ -1343,51 +1356,50 @@ private fun PdfSingleTurningPage(
     frontIndex: Int,
     progress: Float,
     direction: Int,
+    curlY: Float,
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
     modifier: Modifier = Modifier
 ) {
-    val p = progress.coerceIn(0f, 1f)
-    val rotation = if (direction == 1) -88f * p else 88f * p
-    val origin = if (direction == 1) {
-        TransformOrigin(0f, 0.5f)
-    } else {
-        TransformOrigin(1f, 0.5f)
-    }
     val bitmap = remember(document, frontIndex, renderWidthPx, theme) {
         document.cachedPage(frontIndex, renderWidthPx, theme)
     }
 
-    Box(
-        modifier = modifier.graphicsLayer {
-            transformOrigin = origin
-            rotationY = rotation
-            cameraDistance = 48f
-            shadowElevation = 18f * p
-            scaleY = 1f - (0.008f * p)
+    PageCurl(
+        progress = progress,
+        direction = direction,
+        touchYFraction = curlY,
+        crossSpine = false,
+        modifier = modifier,
+        front = {
+            PdfFrozenPage(
+                document = document,
+                bitmap = bitmap,
+                index = frontIndex,
+                totalPages = document.pageCount,
+                theme = theme,
+                renderWidthPx = renderWidthPx,
+                highlights = highlights,
+                modifier = Modifier.fillMaxSize()
+            )
+        },
+        back = {
+            PdfFrozenPage(
+                document = document,
+                bitmap = bitmap,
+                index = frontIndex,
+                totalPages = document.pageCount,
+                theme = theme,
+                renderWidthPx = renderWidthPx,
+                highlights = highlights,
+                modifier = Modifier.fillMaxSize()
+            )
         }
-    ) {
-        PdfFrozenPage(
-            document = document,
-            bitmap = bitmap,
-            index = frontIndex,
-            totalPages = document.pageCount,
-            theme = theme,
-            renderWidthPx = renderWidthPx,
-            highlights = highlights,
-            modifier = Modifier.fillMaxSize()
-        )
-        Box(
-            modifier = Modifier
-                .align(if (direction == 1) Alignment.CenterEnd else Alignment.CenterStart)
-                .width(18.dp)
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.16f * p))
-        )
-    }
+    )
 }
 
+@Suppress("UNUSED_PARAMETER")
 @Composable
 private fun PdfTurningPage(
     document: PdfBookDocument,
@@ -1395,6 +1407,7 @@ private fun PdfTurningPage(
     backIndex: Int?,
     progress: Float,
     direction: Int,
+    curlY: Float,
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
@@ -1402,22 +1415,6 @@ private fun PdfTurningPage(
     crossSpine: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val p = progress.coerceIn(0f, 1f)
-    val showingBack = p > 0.5f
-    val rotation = if (direction == 1) -180f * p else 180f * p
-    val origin = if (direction == 1) {
-        TransformOrigin(0f, 0.5f)
-    } else {
-        TransformOrigin(1f, 0.5f)
-    }
-    val spineShiftPx = if (crossSpine) {
-        with(LocalDensity.current) { 10.dp.toPx() } * p
-    } else {
-        0f
-    }
-
-    // EPUB motorunda olduğu gibi, dönen yaprağın iki yüzünü dönüş başlamadan
-    // sabitliyoruz. Animasyon sırasında PdfPage yeniden render/recompose edilmez.
     val frontBitmap = remember(document, frontIndex, renderWidthPx, theme) {
         frontIndex
             ?.takeIf { it in 0 until document.pageCount }
@@ -1429,52 +1426,38 @@ private fun PdfTurningPage(
             ?.let { document.cachedPage(it, renderWidthPx, theme) }
     }
 
-    Box(
-        modifier = modifier.graphicsLayer {
-            transformOrigin = origin
-            rotationY = rotation
-            translationX = when {
-                !crossSpine -> 0f
-                direction == 1 -> -spineShiftPx
-                else -> spineShiftPx
-            }
-            cameraDistance = cameraDistanceValue
-            shadowElevation = 18f * (1f - abs(0.5f - p) * 2f)
-            scaleY = 1f
-        }
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    if (showingBack) scaleX = -1f
-                }
-        ) {
+    PageCurl(
+        progress = progress,
+        direction = direction,
+        touchYFraction = curlY,
+        crossSpine = crossSpine,
+        modifier = modifier,
+        front = {
             PdfFrozenPage(
                 document = document,
-                bitmap = if (showingBack) backBitmap else frontBitmap,
-                index = if (showingBack) backIndex else frontIndex,
+                bitmap = frontBitmap,
+                index = frontIndex,
                 totalPages = document.pageCount,
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
                 modifier = Modifier.fillMaxSize()
             )
-
-            val edgeAlpha = 0.18f * (1f - abs(0.5f - p) * 2f)
-            Box(
-                modifier = Modifier
-                    .align(
-                        if (direction == 1) Alignment.CenterStart else Alignment.CenterEnd
-                    )
-                    .width(26.dp)
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = edgeAlpha))
+        },
+        back = {
+            PdfFrozenPage(
+                document = document,
+                bitmap = backBitmap ?: frontBitmap,
+                index = backIndex ?: frontIndex,
+                totalPages = document.pageCount,
+                theme = theme,
+                renderWidthPx = renderWidthPx,
+                highlights = highlights,
+                modifier = Modifier.fillMaxSize()
             )
         }
-    }
+    )
 }
-
 
 @Composable
 private fun PdfFrozenHighlightOverlay(
