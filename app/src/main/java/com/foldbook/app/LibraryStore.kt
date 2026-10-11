@@ -2,6 +2,7 @@ package com.foldbook.app
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
@@ -16,6 +17,11 @@ data class LibraryBook(
     val format: BookFormat,
     val modifiedAt: Long = 0L,
     val isFavorite: Boolean = false
+)
+
+data class PickedBookAddResult(
+    val book: LibraryBook,
+    val alreadyExists: Boolean
 )
 
 data class BookNote(
@@ -58,6 +64,7 @@ object LibraryStore {
     private const val KEY_FAVORITES = "favorite_book_uris"
     private const val KEY_NOTES_JSON = "book_notes_json"
     private const val KEY_HIGHLIGHTS_JSON = "book_highlights_json"
+    private const val KEY_PICKED_BOOKS_JSON = "picked_books_json"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -73,6 +80,143 @@ object LibraryStore {
         return value
             ?.takeIf { it.isNotBlank() }
             ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+    }
+
+    fun addPickedBook(context: Context, uri: Uri): PickedBookAddResult {
+        val uriString = uri.toString()
+        val existing = readPickedBooks(context).firstOrNull { it.uri == uriString }
+        if (existing != null) {
+            return PickedBookAddResult(existing, alreadyExists = true)
+        }
+
+        val displayName = resolvePickedDisplayName(context, uri)
+        val format = detectPickedBookFormat(context, uri, displayName)
+            ?: error("FoldBook yalnızca EPUB ve PDF dosyalarını ekleyebilir.")
+        val title = displayName
+            .substringBeforeLast('.', displayName)
+            .replace('_', ' ')
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { "İsimsiz Kitap" }
+
+        val book = LibraryBook(
+            title = title,
+            uri = uriString,
+            format = format,
+            modifiedAt = System.currentTimeMillis(),
+            isFavorite = isFavorite(context, uriString)
+        )
+        savePickedBooks(context, readPickedBooks(context) + book)
+        return PickedBookAddResult(book, alreadyExists = false)
+    }
+
+    fun readPickedBooks(context: Context): List<LibraryBook> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_PICKED_BOOKS_JSON, "[]")
+            .orEmpty()
+
+        return runCatching {
+            val array = JSONArray(raw.ifBlank { "[]" })
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val uri = item.optString("uri").trim()
+                    if (uri.isBlank()) continue
+                    val format = runCatching {
+                        BookFormat.valueOf(item.optString("format"))
+                    }.getOrNull() ?: continue
+                    val title = item.optString("title")
+                        .trim()
+                        .ifBlank { "İsimsiz Kitap" }
+
+                    add(
+                        LibraryBook(
+                            title = title,
+                            uri = uri,
+                            format = format,
+                            modifiedAt = item.optLong("modifiedAt", 0L),
+                            isFavorite = isFavorite(context, uri)
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun mergePickedBooks(
+        context: Context,
+        folderBooks: List<LibraryBook>
+    ): List<LibraryBook> {
+        return (readPickedBooks(context) + folderBooks)
+            .distinctBy { it.uri }
+            .map { book -> book.copy(isFavorite = isFavorite(context, book.uri)) }
+            .sortedWith(
+                compareByDescending<LibraryBook> { it.modifiedAt }
+                    .thenBy { it.title.lowercase() }
+            )
+    }
+
+    fun isPickedBook(context: Context, bookUri: String): Boolean {
+        return readPickedBooks(context).any { it.uri == bookUri }
+    }
+
+    private fun savePickedBooks(context: Context, books: List<LibraryBook>) {
+        val array = JSONArray()
+        books.distinctBy { it.uri }.forEach { book ->
+            array.put(
+                JSONObject()
+                    .put("title", book.title)
+                    .put("uri", book.uri)
+                    .put("format", book.format.name)
+                    .put("modifiedAt", book.modifiedAt)
+            )
+        }
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PICKED_BOOKS_JSON, array.toString())
+            .apply()
+    }
+
+    private fun resolvePickedDisplayName(context: Context, uri: Uri): String {
+        if (uri.scheme.equals("content", ignoreCase = true)) {
+            runCatching {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(OpenableColumns.DISPLAY_NAME),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0 && cursor.moveToFirst()) {
+                        val name = cursor.getString(index).orEmpty().trim()
+                        if (name.isNotBlank()) return name
+                    }
+                }
+            }
+        }
+
+        return uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() }
+            ?: "kitap"
+    }
+
+    private fun detectPickedBookFormat(
+        context: Context,
+        uri: Uri,
+        displayName: String
+    ): BookFormat? {
+        val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        return when {
+            mime.equals("application/pdf", ignoreCase = true) -> BookFormat.PDF
+            mime.equals("application/epub+zip", ignoreCase = true) -> BookFormat.EPUB
+            mime.equals("application/x-epub+zip", ignoreCase = true) -> BookFormat.EPUB
+            displayName.endsWith(".pdf", ignoreCase = true) -> BookFormat.PDF
+            displayName.endsWith(".epub", ignoreCase = true) -> BookFormat.EPUB
+            else -> null
+        }
     }
 
     fun saveActiveBook(context: Context, book: LibraryBook) {
@@ -222,6 +366,26 @@ object LibraryStore {
         book: LibraryBook,
         requestedTitle: String
     ): String {
+        val safeTitle = requestedTitle
+            .trim()
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { error("Kitap adı boş olamaz.") }
+
+        if (isPickedBook(context, book.uri)) {
+            val updated = readPickedBooks(context).map { current ->
+                if (current.uri == book.uri) current.copy(title = safeTitle) else current
+            }
+            savePickedBooks(context, updated)
+
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (prefs.getString(KEY_ACTIVE_BOOK_URI, null) == book.uri) {
+                prefs.edit().putString(KEY_ACTIVE_BOOK_TITLE, safeTitle).apply()
+            }
+            return book.uri
+        }
+
         val treeUri = savedFolder(context)
         val root = treeUri
             ?.takeIf { it.scheme.equals("content", ignoreCase = true) }
@@ -235,13 +399,6 @@ object LibraryStore {
         val extension = originalName
             .substringAfterLast('.', book.format.name.lowercase())
             .lowercase()
-
-        val safeTitle = requestedTitle
-            .trim()
-            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .ifBlank { error("Kitap adı boş olamaz.") }
 
         val newFileName = "$safeTitle.$extension"
         if (originalName == newFileName) return book.uri
@@ -300,11 +457,19 @@ object LibraryStore {
     }
 
     fun deleteBook(context: Context, book: LibraryBook) {
-        val file = DocumentFile.fromSingleUri(context, Uri.parse(book.uri))
-            ?: error("Kitap dosyasına erişilemedi.")
+        val picked = isPickedBook(context, book.uri)
+        if (picked) {
+            savePickedBooks(
+                context,
+                readPickedBooks(context).filterNot { it.uri == book.uri }
+            )
+        } else {
+            val file = DocumentFile.fromSingleUri(context, Uri.parse(book.uri))
+                ?: error("Kitap dosyasına erişilemedi.")
 
-        if (!file.delete()) {
-            error("Kitap silinemedi. Dosya için yazma izni gerekebilir.")
+            if (!file.delete()) {
+                error("Kitap silinemedi. Dosya için yazma izni gerekebilir.")
+            }
         }
 
         setFavorite(context, book.uri, false)

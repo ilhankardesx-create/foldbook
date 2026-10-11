@@ -410,7 +410,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     val activity = context as ComponentActivity
     val scope = rememberCoroutineScope()
 
-    var library by remember { mutableStateOf(BundledGuide.withGuide(context, emptyList())) }
+    var library by remember { mutableStateOf(BundledGuide.withGuide(context, LibraryStore.readPickedBooks(context))) }
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
 
@@ -444,7 +444,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                     LibraryStore.scanFolder(context, uri)
                 }
             }.onSuccess { found ->
-                library = BundledGuide.withGuide(context, found)
+                library = BundledGuide.withGuide(context, LibraryStore.mergePickedBooks(context, found))
             }.onFailure {
                 libraryError = it.message ?: "Kitap klasörü okunamadı."
             }
@@ -517,7 +517,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 }
             }.onSuccess { refreshed ->
                 if (refreshed != null) {
-                    library = BundledGuide.withGuide(context, refreshed)
+                    library = BundledGuide.withGuide(context, LibraryStore.mergePickedBooks(context, refreshed))
                 }
             }.onFailure {
                 libraryError = it.message ?: "Kitap yeniden adlandırılamadı."
@@ -547,7 +547,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 }
             }.onSuccess { refreshed ->
                 if (refreshed != null) {
-                    library = BundledGuide.withGuide(context, refreshed)
+                    library = BundledGuide.withGuide(context, LibraryStore.mergePickedBooks(context, refreshed))
                 } else {
                     library = library.filterNot { it.uri == book.uri }
                 }
@@ -572,6 +572,54 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             }
             LibraryStore.saveFolder(context, uri)
             scanFolder(uri)
+        }
+    }
+
+    val bookPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+
+            scope.launch {
+                libraryLoading = true
+                libraryError = null
+
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        LibraryStore.addPickedBook(context, uri)
+                    }
+                }.onSuccess { result ->
+                    Toast.makeText(
+                        context,
+                        if (result.alreadyExists) {
+                            "Bu kitap zaten rafta."
+                        } else {
+                            "Kitap rafa eklendi."
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    val folder = LibraryStore.savedFolder(context)
+                    if (folder != null) {
+                        scanFolder(folder)
+                    } else {
+                        library = BundledGuide.withGuide(
+                            context,
+                            LibraryStore.readPickedBooks(context)
+                        )
+                        libraryLoading = false
+                    }
+                }.onFailure { error ->
+                    libraryError = error.message ?: "Kitap rafa eklenemedi."
+                    libraryLoading = false
+                }
+            }
         }
     }
 
@@ -618,8 +666,25 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             isLoading = libraryLoading || readerLoading,
             error = libraryError ?: readerError,
             onChooseFolder = { folderPicker.launch(null) },
+            onChooseFile = {
+                bookPicker.launch(
+                    arrayOf(
+                        "application/epub+zip",
+                        "application/x-epub+zip",
+                        "application/pdf"
+                    )
+                )
+            },
             onRefresh = {
-                LibraryStore.savedFolder(context)?.let { scanFolder(it) }
+                val folder = LibraryStore.savedFolder(context)
+                if (folder != null) {
+                    scanFolder(folder)
+                } else {
+                    library = BundledGuide.withGuide(
+                        context,
+                        LibraryStore.readPickedBooks(context)
+                    )
+                }
             },
             onBookClick = ::openBook,
             onToggleFavorite = ::toggleFavorite,
@@ -635,6 +700,7 @@ private fun LibraryScreen(
     isLoading: Boolean,
     error: String?,
     onChooseFolder: () -> Unit,
+    onChooseFile: () -> Unit,
     onRefresh: () -> Unit,
     onBookClick: (LibraryBook) -> Unit,
     onToggleFavorite: (LibraryBook) -> Unit,
@@ -890,10 +956,16 @@ private fun LibraryScreen(
             },
             text = {
                 Text(
-                    text = if (BundledGuide.isGuide(book.uri)) {
-                        "FoldBook Kullanım Kılavuzu raftan kaldırılacak ve uygulamayı tekrar açtığında geri gelmeyecek."
-                    } else {
-                        "“${book.title}” cihazındaki kitap klasöründen silinecek."
+                    text = when {
+                        BundledGuide.isGuide(book.uri) -> {
+                            "FoldBook Kullanım Kılavuzu raftan kaldırılacak ve uygulamayı tekrar açtığında geri gelmeyecek."
+                        }
+                        LibraryStore.isPickedBook(context, book.uri) -> {
+                            "“${book.title}” FoldBook rafından kaldırılacak. Orijinal dosya cihazında kalacak."
+                        }
+                        else -> {
+                            "“${book.title}” cihazındaki kitap klasöründen silinecek."
+                        }
                     }
                 )
             },
@@ -1099,6 +1171,20 @@ private fun LibraryScreen(
                             }
 
 
+                            Button(
+                                onClick = onChooseFile,
+                                enabled = !isLoading,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("+ Kitap Dosyası Ekle (EPUB / PDF)")
+                            }
+
+                            Text(
+                                text = "Tek bir kitap seçer; daha önce eklediğin kitaplar rafta kalır.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                            )
+
                             Text(
                                 text = "Tema",
                                 fontWeight = FontWeight.Bold,
@@ -1184,7 +1270,8 @@ private fun LibraryScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(24.dp),
-                        onChooseFolder = onChooseFolder
+                        onChooseFolder = onChooseFolder,
+                        onChooseFile = onChooseFile
                     )
                 }
 
@@ -1235,7 +1322,8 @@ private fun LibraryScreen(
 @Composable
 private fun EmptyLibrary(
     modifier: Modifier = Modifier,
-    onChooseFolder: () -> Unit
+    onChooseFolder: () -> Unit,
+    onChooseFile: () -> Unit
 ) {
     Box(
         modifier = modifier,
@@ -1270,6 +1358,12 @@ private fun EmptyLibrary(
 
             Button(onClick = onChooseFolder) {
                 Text("Kitapların Olduğu Klasörü Seç")
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Button(onClick = onChooseFile) {
+                Text("+ Kitap Dosyası Ekle")
             }
         }
     }
