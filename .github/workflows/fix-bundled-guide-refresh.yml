@@ -1,0 +1,28 @@
+name: Fix Bundled Guide Refresh
+
+on:
+  push:
+    branches: [ "development" ]
+    paths: [ ".github/workflows/fix-bundled-guide-refresh.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+
+      - name: Keep guide after library refresh
+        run: python3 scripts/fix_bundled_guide_refresh.py
+
+      - name: Commit refresh fix
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt
+          git commit -m "Keep bundled guide after library refresh"
+          git push origin HEAD:development
