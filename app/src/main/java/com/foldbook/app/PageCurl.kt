@@ -53,15 +53,17 @@ internal fun PageCurl(
 
     var frontBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var mirroredBackBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var capturesReady by remember { mutableStateOf(false) }
 
     LaunchedEffect(frontLayer, backLayer) {
+        capturesReady = false
         withFrameNanos { }
 
-        frontBitmap = runCatching {
+        val capturedFront = runCatching {
             frontLayer.toImageBitmap().asAndroidBitmap()
         }.getOrNull()
 
-        mirroredBackBitmap = runCatching {
+        val capturedBack = runCatching {
             val source = backLayer.toImageBitmap().asAndroidBitmap()
             val matrix = Matrix().apply { setScale(-1f, 1f) }
             Bitmap.createBitmap(
@@ -74,6 +76,10 @@ internal fun PageCurl(
                 true
             )
         }.getOrNull()
+
+        frontBitmap = capturedFront
+        mirroredBackBitmap = capturedBack
+        capturesReady = capturedFront != null && capturedBack != null
     }
 
     Box(
@@ -86,6 +92,13 @@ internal fun PageCurl(
                 .fillMaxSize()
                 .drawWithContent {
                     frontLayer.record {
+                        this@drawWithContent.drawContent()
+                    }
+
+                    // On the first one or two frames the bitmap snapshot is not ready
+                    // yet. Keep the live current page visible so the page underneath
+                    // cannot flash through when the user only nudges and releases.
+                    if (!capturesReady) {
                         this@drawWithContent.drawContent()
                     }
                 }
@@ -113,17 +126,20 @@ internal fun PageCurl(
             val width = size.width.coerceAtLeast(1f)
             val height = size.height.coerceAtLeast(1f)
 
+            // The live front composable above is deliberately visible until both
+            // snapshots exist. Drawing an empty graphics layer here was the cause of
+            // the full-page flash seen on very short drag/cancel gestures.
+            if (!capturesReady) {
+                return@Canvas
+            }
+
             if (p <= 0.001f) {
                 drawLayer(frontLayer)
                 return@Canvas
             }
 
-            val capturedFront = frontBitmap
-            val capturedBack = mirroredBackBitmap
-            if (capturedFront == null || capturedBack == null) {
-                drawLayer(frontLayer)
-                return@Canvas
-            }
+            val capturedFront = frontBitmap ?: return@Canvas
+            val capturedBack = mirroredBackBitmap ?: return@Canvas
 
             val meshWidth = 52
             val meshHeight = 20
@@ -147,6 +163,16 @@ internal fun PageCurl(
 
             val segmentLength = width / meshWidth
             val fingerHeight = height * touchY
+
+            // In two-page mode the two page boxes are separated by the 4dp book
+            // spine. The old mesh travelled exactly one page width, so the final
+            // curled bitmap landed 4dp short and visibly snapped away when the live
+            // destination page replaced it. Carry the sheet across that spine gap.
+            val spineTravel = if (crossSpine) {
+                4f * density * smootherStep(p)
+            } else {
+                0f
+            }
 
             var vertex = 0
 
@@ -186,7 +212,6 @@ internal fun PageCurl(
                 }
 
                 for (column in 0..meshWidth) {
-                    val sourceX = width * column / meshWidth
                     val distanceIndex = if (forward) {
                         column
                     } else {
@@ -204,9 +229,9 @@ internal fun PageCurl(
                     val localZ = zAlong[distanceIndex]
 
                     val outputX = if (forward) {
-                        localX
+                        localX - spineTravel
                     } else {
-                        width - localX
+                        width - localX + spineTravel
                     }
 
                     val normalizedLift =
