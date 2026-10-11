@@ -410,7 +410,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     val activity = context as ComponentActivity
     val scope = rememberCoroutineScope()
 
-    var library by remember { mutableStateOf<List<LibraryBook>>(emptyList()) }
+    var library by remember { mutableStateOf(BundledGuide.withGuide(context, emptyList())) }
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
 
@@ -443,8 +443,8 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 withContext(Dispatchers.IO) {
                     LibraryStore.scanFolder(context, uri)
                 }
-            }.onSuccess {
-                library = it
+            }.onSuccess { found ->
+                library = BundledGuide.withGuide(context, found)
             }.onFailure {
                 libraryError = it.message ?: "Kitap klasörü okunamadı."
             }
@@ -801,25 +801,27 @@ private fun LibraryScreen(
                         )
                     }
 
-                    Button(
-                        onClick = {
-                            renameBookTarget = book
-                            renameText = book.title
-                            actionBook = null
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Yeniden Adlandır")
-                    }
+                    if (!BundledGuide.isGuide(book.uri)) {
+                        Button(
+                            onClick = {
+                                renameBookTarget = book
+                                renameText = book.title
+                                actionBook = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Yeniden Adlandır")
+                        }
 
-                    Button(
-                        onClick = {
-                            deleteBookTarget = book
-                            actionBook = null
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Kitabı Sil")
+                        Button(
+                            onClick = {
+                                deleteBookTarget = book
+                                actionBook = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Kitabı Sil")
+                        }
                     }
                 }
             },
