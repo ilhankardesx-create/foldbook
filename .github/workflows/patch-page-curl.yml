@@ -1,0 +1,294 @@
+name: Patch Page Curl Engine
+
+on:
+  push:
+    branches:
+      - development
+    paths:
+      - .github/workflows/patch-page-curl.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Replace old page flip engine
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main_path = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          main = main_path.read_text(encoding='utf-8')
+
+          pattern = re.compile(
+              r'@Composable\nprivate fun TurningPage\(.*?\n@Composable\nprivate fun BookSpine',
+              re.S,
+          )
+          replacement = r'''@Suppress("UNUSED_PARAMETER")
+          @Composable
+          private fun TurningPage(
+              frontPage: ReaderPage?,
+              frontNumber: Int,
+              backPage: ReaderPage?,
+              backNumber: Int,
+              progress: Float,
+              direction: Int,
+              curlY: Float,
+              crossSpine: Boolean = false,
+              cameraDistanceValue: Float = 30f,
+              modifier: Modifier = Modifier
+          ) {
+              PageCurl(
+                  progress = progress,
+                  direction = direction,
+                  touchYFraction = curlY,
+                  crossSpine = crossSpine,
+                  modifier = modifier,
+                  front = {
+                      BookPage(
+                          page = frontPage,
+                          pageNumber = frontNumber,
+                          modifier = Modifier.fillMaxSize()
+                      )
+                  },
+                  back = {
+                      BookPage(
+                          page = backPage ?: frontPage,
+                          pageNumber = if (backPage != null) backNumber else frontNumber,
+                          isBackSide = true,
+                          modifier = Modifier.fillMaxSize()
+                      )
+                  }
+              )
+          }
+
+          @Composable
+          private fun BookSpine'''
+
+          main, count = pattern.subn(replacement, main, count=1)
+          if count != 1:
+              raise SystemExit(f'EPUB TurningPage replacement count: {count}')
+          main_path.write_text(main, encoding='utf-8')
+
+          pdf_path = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          pdf = pdf_path.read_text(encoding='utf-8')
+
+          if 'import androidx.compose.foundation.gestures.detectDragGestures\n' not in pdf:
+              pdf = pdf.replace(
+                  'import androidx.compose.foundation.gestures.detectHorizontalDragGestures\n',
+                  'import androidx.compose.foundation.gestures.detectDragGestures\n',
+                  1,
+              )
+
+          pdf = pdf.replace(
+              '''    var dragProgress by remember { mutableFloatStateOf(0f) }\n    var turnDirection by remember { mutableIntStateOf(0) }\n    var pageWidthPx by remember { mutableFloatStateOf(900f) }\n''',
+              '''    var dragProgress by remember { mutableFloatStateOf(0f) }\n    var dragYFraction by remember { mutableFloatStateOf(0.68f) }\n    var turnDirection by remember { mutableIntStateOf(0) }\n    var pageWidthPx by remember { mutableFloatStateOf(900f) }\n    var pageHeightPx by remember { mutableFloatStateOf(1200f) }\n''',
+              1,
+          )
+
+          pdf = pdf.replace(
+              '''        .onSizeChanged {\n            pageWidthPx = if (twoPage) {\n                ((it.width - spineWidthPx) / 2f).coerceAtLeast(1f)\n            } else {\n                it.width.toFloat().coerceAtLeast(1f)\n            }\n        }\n        .pointerInput(pageIndex, twoPage, pageWidthPx, settling) {\n''',
+              '''        .onSizeChanged {\n            pageWidthPx = if (twoPage) {\n                ((it.width - spineWidthPx) / 2f).coerceAtLeast(1f)\n            } else {\n                it.width.toFloat().coerceAtLeast(1f)\n            }\n            pageHeightPx = it.height.toFloat().coerceAtLeast(1f)\n        }\n        .pointerInput(pageIndex, twoPage, pageWidthPx, pageHeightPx, settling) {\n''',
+              1,
+          )
+
+          pdf = pdf.replace(
+              '''            detectHorizontalDragGestures(\n                onDragStart = {\n                    dragPx = 0f\n                    dragProgress = 0f\n                    turnDirection = 0\n                },\n                onHorizontalDrag = { change, dragAmount ->\n                    change.consume()\n                    val proposed = (dragPx + dragAmount)\n''',
+              '''            detectDragGestures(\n                onDragStart = { startOffset ->\n                    dragPx = 0f\n                    dragProgress = 0f\n                    dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)\n                    turnDirection = 0\n                },\n                onDrag = { change, dragAmount ->\n                    change.consume()\n                    dragYFraction = (change.position.y / pageHeightPx).coerceIn(0.06f, 0.94f)\n                    val proposed = (dragPx + dragAmount.x)\n''',
+              1,
+          )
+
+          pdf = pdf.replace(
+              '''        turnDirection = 1\n        dragPx = -pageWidthPx\n        dragProgress = 0f\n''',
+              '''        turnDirection = 1\n        dragPx = -pageWidthPx\n        dragProgress = 0f\n        dragYFraction = 0.68f\n''',
+              1,
+          )
+
+          pdf = pdf.replace(
+              '''                turnDirection = turnDirection,\n                progress = progress,\n                theme = theme,\n''',
+              '''                turnDirection = turnDirection,\n                progress = progress,\n                curlY = dragYFraction,\n                theme = theme,\n''',
+              1,
+          )
+          pdf = pdf.replace(
+              '''                turnDirection = turnDirection,\n                progress = progress,\n                theme = theme,\n''',
+              '''                turnDirection = turnDirection,\n                progress = progress,\n                curlY = dragYFraction,\n                theme = theme,\n''',
+              1,
+          )
+
+          pdf = pdf.replace(
+              '''    turnDirection: Int,\n    progress: Float,\n    theme: ReaderThemeOption,\n''',
+              '''    turnDirection: Int,\n    progress: Float,\n    curlY: Float,\n    theme: ReaderThemeOption,\n''',
+              1,
+          )
+          pdf = pdf.replace(
+              '''    turnDirection: Int,\n    progress: Float,\n    theme: ReaderThemeOption,\n''',
+              '''    turnDirection: Int,\n    progress: Float,\n    curlY: Float,\n    theme: ReaderThemeOption,\n''',
+              1,
+          )
+
+          pdf = pdf.replace(
+              '''                    progress = progress,\n                    direction = -1,\n                    theme = theme,\n''',
+              '''                    progress = progress,\n                    direction = -1,\n                    curlY = curlY,\n                    theme = theme,\n''',
+              1,
+          )
+          pdf = pdf.replace(
+              '''                    progress = progress,\n                    direction = 1,\n                    theme = theme,\n''',
+              '''                    progress = progress,\n                    direction = 1,\n                    curlY = curlY,\n                    theme = theme,\n''',
+              1,
+          )
+          pdf = pdf.replace(
+              '''                progress = progress,\n                direction = turnDirection,\n                theme = theme,\n''',
+              '''                progress = progress,\n                direction = turnDirection,\n                curlY = curlY,\n                theme = theme,\n''',
+              1,
+          )
+
+          single_pattern = re.compile(
+              r'@Composable\nprivate fun PdfSingleTurningPage\(.*?\n@Composable\nprivate fun PdfTurningPage',
+              re.S,
+          )
+          single_replacement = r'''@Composable
+          private fun PdfSingleTurningPage(
+              document: PdfBookDocument,
+              frontIndex: Int,
+              progress: Float,
+              direction: Int,
+              curlY: Float,
+              theme: ReaderThemeOption,
+              renderWidthPx: Int,
+              highlights: List<BookHighlight>,
+              modifier: Modifier = Modifier
+          ) {
+              val bitmap = remember(document, frontIndex, renderWidthPx, theme) {
+                  document.cachedPage(frontIndex, renderWidthPx, theme)
+              }
+
+              PageCurl(
+                  progress = progress,
+                  direction = direction,
+                  touchYFraction = curlY,
+                  crossSpine = false,
+                  modifier = modifier,
+                  front = {
+                      PdfFrozenPage(
+                          document = document,
+                          bitmap = bitmap,
+                          index = frontIndex,
+                          totalPages = document.pageCount,
+                          theme = theme,
+                          renderWidthPx = renderWidthPx,
+                          highlights = highlights,
+                          modifier = Modifier.fillMaxSize()
+                      )
+                  },
+                  back = {
+                      PdfFrozenPage(
+                          document = document,
+                          bitmap = bitmap,
+                          index = frontIndex,
+                          totalPages = document.pageCount,
+                          theme = theme,
+                          renderWidthPx = renderWidthPx,
+                          highlights = highlights,
+                          modifier = Modifier.fillMaxSize()
+                      )
+                  }
+              )
+          }
+
+          @Composable
+          private fun PdfTurningPage'''
+          pdf, count = single_pattern.subn(single_replacement, pdf, count=1)
+          if count != 1:
+              raise SystemExit(f'PDF single curl replacement count: {count}')
+
+          turning_pattern = re.compile(
+              r'@Composable\nprivate fun PdfTurningPage\(.*?\n\n@Composable\nprivate fun PdfFrozenHighlightOverlay',
+              re.S,
+          )
+          turning_replacement = r'''@Suppress("UNUSED_PARAMETER")
+          @Composable
+          private fun PdfTurningPage(
+              document: PdfBookDocument,
+              frontIndex: Int?,
+              backIndex: Int?,
+              progress: Float,
+              direction: Int,
+              curlY: Float,
+              theme: ReaderThemeOption,
+              renderWidthPx: Int,
+              highlights: List<BookHighlight>,
+              cameraDistanceValue: Float = 30f,
+              crossSpine: Boolean = false,
+              modifier: Modifier = Modifier
+          ) {
+              val frontBitmap = remember(document, frontIndex, renderWidthPx, theme) {
+                  frontIndex
+                      ?.takeIf { it in 0 until document.pageCount }
+                      ?.let { document.cachedPage(it, renderWidthPx, theme) }
+              }
+              val backBitmap = remember(document, backIndex, renderWidthPx, theme) {
+                  backIndex
+                      ?.takeIf { it in 0 until document.pageCount }
+                      ?.let { document.cachedPage(it, renderWidthPx, theme) }
+              }
+
+              PageCurl(
+                  progress = progress,
+                  direction = direction,
+                  touchYFraction = curlY,
+                  crossSpine = crossSpine,
+                  modifier = modifier,
+                  front = {
+                      PdfFrozenPage(
+                          document = document,
+                          bitmap = frontBitmap,
+                          index = frontIndex,
+                          totalPages = document.pageCount,
+                          theme = theme,
+                          renderWidthPx = renderWidthPx,
+                          highlights = highlights,
+                          modifier = Modifier.fillMaxSize()
+                      )
+                  },
+                  back = {
+                      PdfFrozenPage(
+                          document = document,
+                          bitmap = backBitmap ?: frontBitmap,
+                          index = backIndex ?: frontIndex,
+                          totalPages = document.pageCount,
+                          theme = theme,
+                          renderWidthPx = renderWidthPx,
+                          highlights = highlights,
+                          modifier = Modifier.fillMaxSize()
+                      )
+                  }
+              )
+          }
+
+          @Composable
+          private fun PdfFrozenHighlightOverlay'''
+          pdf, count = turning_pattern.subn(turning_replacement, pdf, count=1)
+          if count != 1:
+              raise SystemExit(f'PDF two-page curl replacement count: {count}')
+
+          pdf_path.write_text(pdf, encoding='utf-8')
+          PY
+
+      - name: Commit page curl integration
+        shell: bash
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt \
+                  app/src/main/java/com/foldbook/app/PdfReader.kt
+          git commit -m "Replace old page flips with curved page curl"
+          git push origin HEAD:development
