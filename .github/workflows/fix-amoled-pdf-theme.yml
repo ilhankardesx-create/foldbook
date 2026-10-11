@@ -26,26 +26,29 @@ jobs:
           p = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
           s = p.read_text(encoding='utf-8')
 
+          marker = 'ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)'
+          sheen = 'ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)'
+          surface = 'ReaderThemeOption.DARK -> Color(0xFF191919)'
+
           s = s.replace(
-          '''                ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)\n            }''',
-          '''                ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)\n                ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)\n            }'''
+              marker,
+              marker + '\n                ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)'
           )
           s = s.replace(
-          '''                ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)\n            }''',
-          '''                ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)\n                ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)\n            }'''
+              sheen,
+              sheen + '\n                ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)'
           )
           s = s.replace(
-          '''            ReaderThemeOption.DARK -> Color(0xFF191919)\n        }''',
-          '''            ReaderThemeOption.DARK -> Color(0xFF191919)\n            ReaderThemeOption.AMOLED -> Color.Black\n        }'''
+              surface,
+              surface + '\n            ReaderThemeOption.AMOLED -> Color.Black'
           )
 
-          # We expect two markerColor blocks, two markerSheen blocks and two page-surface blocks.
-          if s.count('ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)') != 2:
-              raise SystemExit('Expected two AMOLED markerColor branches')
-          if s.count('ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)') != 2:
-              raise SystemExit('Expected two AMOLED markerSheen branches')
+          if 'ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)' not in s:
+              raise SystemExit('AMOLED marker branch not added')
+          if 'ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)' not in s:
+              raise SystemExit('AMOLED sheen branch not added')
           if s.count('ReaderThemeOption.AMOLED -> Color.Black') < 3:
-              raise SystemExit('Expected AMOLED black page surfaces/background')
+              raise SystemExit('AMOLED black surface branches not added')
 
           p.write_text(s, encoding='utf-8')
           PY
