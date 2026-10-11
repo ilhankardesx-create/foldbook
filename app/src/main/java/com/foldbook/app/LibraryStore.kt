@@ -8,7 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 enum class BookFormat { EPUB, PDF }
-enum class ReaderThemeOption { LIGHT, SEPIA, DARK }
+enum class ReaderThemeOption { LIGHT, SEPIA, DARK, AMOLED }
 enum class ReaderFontSize { SMALL, MEDIUM, LARGE }
 
 data class LibraryBook(

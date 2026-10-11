@@ -409,6 +409,14 @@ private class PdfBookDocument(
                 -0.2122f, -0.4167f, -0.0809f, 0f, 208f,
                 0f, 0f, 0f, 1f, 0f
             )
+
+            ReaderThemeOption.AMOLED -> floatArrayOf(
+                // Beyaz kağıdı gerçek siyaha, siyah yazıyı beyaza çevir.
+                -0.2126f, -0.7152f, -0.0722f, 0f, 255f,
+                -0.2126f, -0.7152f, -0.0722f, 0f, 255f,
+                -0.2126f, -0.7152f, -0.0722f, 0f, 255f,
+                0f, 0f, 0f, 1f, 0f
+            )
         }
 
         val output = Bitmap.createBitmap(
@@ -493,6 +501,7 @@ fun PdfReaderScreen(
         ReaderThemeOption.LIGHT -> Color(0xFFE8DFD0)
         ReaderThemeOption.SEPIA -> Color(0xFFC9B38E)
         ReaderThemeOption.DARK -> Color(0xFF111111)
+        ReaderThemeOption.AMOLED -> Color.Black
     }
 
     var ttsReady by remember { mutableStateOf(false) }

@@ -219,6 +219,12 @@ private fun readerPalette(theme: ReaderThemeOption): ReaderPalette = when (theme
         pageBack = Color(0xFF232323),
         text = Color(0xFFE7E2D8)
     )
+    ReaderThemeOption.AMOLED -> ReaderPalette(
+        background = Color.Black,
+        page = Color.Black,
+        pageBack = Color.Black,
+        text = Color(0xFFF5F5F5)
+    )
 }
 
 private fun EpubBook.toReaderPages(
@@ -1212,7 +1218,8 @@ private fun LibraryScreen(
                                 listOf(
                                     ReaderThemeOption.LIGHT to "Açık",
                                     ReaderThemeOption.SEPIA to "Sepya",
-                                    ReaderThemeOption.DARK to "Koyu"
+                                    ReaderThemeOption.DARK to "Koyu",
+                                    ReaderThemeOption.AMOLED to "AMOLED"
                                 ).forEach { (option, label) ->
                                     Button(
                                         onClick = {
