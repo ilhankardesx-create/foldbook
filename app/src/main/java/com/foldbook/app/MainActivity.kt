@@ -528,6 +528,12 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
     }
 
     fun deleteBook(book: LibraryBook) {
+        if (BundledGuide.isGuide(book.uri)) {
+            BundledGuide.dismiss(context)
+            library = library.filterNot { it.uri == book.uri }
+            return
+        }
+
         val folder = LibraryStore.savedFolder(context)
 
         scope.launch {
@@ -812,16 +818,16 @@ private fun LibraryScreen(
                         ) {
                             Text("Yeniden Adlandır")
                         }
+                    }
 
-                        Button(
-                            onClick = {
-                                deleteBookTarget = book
-                                actionBook = null
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Kitabı Sil")
-                        }
+                    Button(
+                        onClick = {
+                            deleteBookTarget = book
+                            actionBook = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Kitabı Sil")
                     }
                 }
             },
@@ -884,7 +890,11 @@ private fun LibraryScreen(
             },
             text = {
                 Text(
-                    text = "“${book.title}” cihazındaki kitap klasöründen silinecek."
+                    text = if (BundledGuide.isGuide(book.uri)) {
+                        "FoldBook Kullanım Kılavuzu raftan kaldırılacak ve uygulamayı tekrar açtığında geri gelmeyecek."
+                    } else {
+                        "“${book.title}” cihazındaki kitap klasöründen silinecek."
+                    }
                 )
             },
             confirmButton = {

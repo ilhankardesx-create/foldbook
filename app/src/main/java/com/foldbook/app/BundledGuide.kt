@@ -17,6 +17,7 @@ object BundledGuide {
     private const val DIRECTORY_NAME = "bundled_books"
     private const val PREFS = "foldbook_bundled_guide"
     private const val KEY_VERSION = "guide_version"
+    private const val KEY_DISMISSED = "guide_dismissed"
     private const val GUIDE_VERSION = 1
 
     const val TITLE = "FoldBook Kullanım Kılavuzu"
@@ -54,11 +55,27 @@ object BundledGuide {
     }
 
     fun withGuide(context: Context, books: List<LibraryBook>): List<LibraryBook> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_DISMISSED, false)) return books
+
         val guide = ensureBook(context)
         return buildList {
             add(guide)
             addAll(books.filterNot { it.uri == guide.uri })
         }
+    }
+
+    fun dismiss(context: Context) {
+        val directory = File(context.filesDir, DIRECTORY_NAME)
+        val destination = File(directory, FILE_NAME)
+        if (destination.exists()) destination.delete()
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_DISMISSED, true)
+            .apply()
+
+        LibraryStore.setFavorite(context, Uri.fromFile(destination).toString(), false)
     }
 
     fun isGuide(uri: String): Boolean {
