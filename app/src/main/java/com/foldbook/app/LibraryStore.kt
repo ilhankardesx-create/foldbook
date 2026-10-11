@@ -58,6 +58,7 @@ object LibraryStore {
     private const val KEY_FAVORITES = "favorite_book_uris"
     private const val KEY_NOTES_JSON = "book_notes_json"
     private const val KEY_HIGHLIGHTS_JSON = "book_highlights_json"
+    private const val DEVICE_LIBRARY_URI = "foldbook://device-library"
 
     fun saveFolder(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -69,9 +70,12 @@ object LibraryStore {
     fun savedFolder(context: Context): Uri? {
         val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_FOLDER_URI, null)
-            ?: return null
 
-        return runCatching { Uri.parse(value) }.getOrNull()
+        return if (value.isNullOrBlank()) {
+            Uri.parse(DEVICE_LIBRARY_URI)
+        } else {
+            runCatching { Uri.parse(value) }.getOrElse { Uri.parse(DEVICE_LIBRARY_URI) }
+        }
     }
 
     fun saveActiveBook(context: Context, book: LibraryBook) {
@@ -222,12 +226,11 @@ object LibraryStore {
         requestedTitle: String
     ): String {
         val treeUri = savedFolder(context)
-            ?: error("Kitap klasörü seçili değil.")
+        val root = treeUri
+            ?.takeIf { it.scheme.equals("content", ignoreCase = true) }
+            ?.let { DocumentFile.fromTreeUri(context, it) }
 
-        val root = DocumentFile.fromTreeUri(context, treeUri)
-            ?: error("Kitap klasörüne erişilemedi.")
-
-        val file = findDocumentByUri(root, book.uri)
+        val file = root?.let { findDocumentByUri(it, book.uri) }
             ?: DocumentFile.fromSingleUri(context, Uri.parse(book.uri))
             ?: error("Kitap dosyasına erişilemedi.")
 
@@ -244,9 +247,7 @@ object LibraryStore {
             .ifBlank { error("Kitap adı boş olamaz.") }
 
         val newFileName = "$safeTitle.$extension"
-        if (originalName.equals(newFileName, ignoreCase = false)) {
-            return book.uri
-        }
+        if (originalName == newFileName) return book.uri
 
         val oldUri = book.uri
         val oldProgress = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -254,23 +255,18 @@ object LibraryStore {
         val wasFavorite = isFavorite(context, oldUri)
 
         if (!file.renameTo(newFileName)) {
-            error("Kitap yeniden adlandırılamadı. Klasör için yazma izni gerekebilir.")
+            error("Kitap yeniden adlandırılamadı. Dosya için yazma izni gerekebilir.")
         }
 
         val newUri = file.uri.toString()
-
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val editor = prefs.edit()
 
         if (newUri != oldUri) {
-            editor
-                .remove(progressKey(oldUri))
-                .putInt(progressKey(newUri), oldProgress)
-
+            editor.remove(progressKey(oldUri)).putInt(progressKey(newUri), oldProgress)
             if (prefs.getString(KEY_LAST_OPENED_URI, null) == oldUri) {
                 editor.putString(KEY_LAST_OPENED_URI, newUri)
             }
-
             if (prefs.getString(KEY_ACTIVE_BOOK_URI, null) == oldUri) {
                 editor.putString(KEY_ACTIVE_BOOK_URI, newUri)
             }
@@ -279,17 +275,13 @@ object LibraryStore {
         if (prefs.getString(KEY_ACTIVE_BOOK_TITLE, null) == book.title) {
             editor.putString(KEY_ACTIVE_BOOK_TITLE, safeTitle)
         }
-
         editor.apply()
 
         if (newUri != oldUri && wasFavorite) {
             setFavorite(context, oldUri, false)
             setFavorite(context, newUri, true)
         }
-
-        if (newUri != oldUri) {
-            migrateHighlights(context, oldUri, newUri)
-        }
+        if (newUri != oldUri) migrateHighlights(context, oldUri, newUri)
 
         return newUri
     }
@@ -298,23 +290,15 @@ object LibraryStore {
         directory: DocumentFile,
         targetUri: String
     ): DocumentFile? {
-        if (directory.uri.toString() == targetUri) {
-            return directory
-        }
+        if (directory.uri.toString() == targetUri) return directory
 
         for (child in directory.listFiles()) {
-            if (child.uri.toString() == targetUri) {
-                return child
-            }
-
+            if (child.uri.toString() == targetUri) return child
             if (child.isDirectory) {
                 val nested = findDocumentByUri(child, targetUri)
-                if (nested != null) {
-                    return nested
-                }
+                if (nested != null) return nested
             }
         }
-
         return null
     }
 
@@ -323,26 +307,23 @@ object LibraryStore {
             ?: error("Kitap dosyasına erişilemedi.")
 
         if (!file.delete()) {
-            error("Kitap silinemedi. Klasör için yazma izni gerekebilir.")
+            error("Kitap silinemedi. Dosya için yazma izni gerekebilir.")
         }
 
         setFavorite(context, book.uri, false)
         deleteHighlightsForBook(context, book.uri)
 
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val editor = prefs.edit()
-            .remove(progressKey(book.uri))
+        val editor = prefs.edit().remove(progressKey(book.uri))
 
         if (prefs.getString(KEY_LAST_OPENED_URI, null) == book.uri) {
             editor.remove(KEY_LAST_OPENED_URI)
         }
         if (prefs.getString(KEY_ACTIVE_BOOK_URI, null) == book.uri) {
-            editor
-                .remove(KEY_ACTIVE_BOOK_URI)
+            editor.remove(KEY_ACTIVE_BOOK_URI)
                 .remove(KEY_ACTIVE_BOOK_TITLE)
                 .remove(KEY_ACTIVE_BOOK_FORMAT)
         }
-
         editor.apply()
     }
 
@@ -353,10 +334,7 @@ object LibraryStore {
         pageNumber: Int,
         text: String
     ) {
-        val cleanText = text
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
+        val cleanText = text.replace(Regex("\\s+"), " ").trim()
         if (cleanText.isBlank()) return
 
         val now = System.currentTimeMillis()
@@ -387,7 +365,6 @@ object LibraryStore {
                     val item = array.optJSONObject(index) ?: continue
                     val text = item.optString("text").trim()
                     if (text.isBlank()) continue
-
                     add(
                         BookNote(
                             id = item.optString("id").ifBlank {
@@ -406,10 +383,7 @@ object LibraryStore {
     }
 
     fun deleteNote(context: Context, noteId: String) {
-        saveNotes(
-            context,
-            readNotes(context).filterNot { it.id == noteId }
-        )
+        saveNotes(context, readNotes(context).filterNot { it.id == noteId })
     }
 
     private fun saveNotes(context: Context, notes: List<BookNote>) {
@@ -585,11 +559,7 @@ object LibraryStore {
     ) {
         if (oldUri == newUri) return
         val updated = readAllHighlights(context).map { highlight ->
-            if (highlight.bookUri == oldUri) {
-                highlight.copy(bookUri = newUri)
-            } else {
-                highlight
-            }
+            if (highlight.bookUri == oldUri) highlight.copy(bookUri = newUri) else highlight
         }
         saveHighlights(context, updated)
     }
@@ -605,18 +575,24 @@ object LibraryStore {
     }
 
     fun scanFolder(context: Context, treeUri: Uri): List<LibraryBook> {
-        val root = DocumentFile.fromTreeUri(context, treeUri)
-            ?: error("Seçilen klasör açılamadı.")
+        val result = mutableListOf<LibraryBook>()
 
-        if (!root.exists() || !root.canRead()) {
-            error("Kitap klasörüne erişilemiyor.")
+        if (treeUri.scheme.equals("content", ignoreCase = true)) {
+            val root = DocumentFile.fromTreeUri(context, treeUri)
+                ?: error("Seçilen klasör açılamadı.")
+
+            if (!root.exists() || !root.canRead()) {
+                error("Kitap klasörüne erişilemiyor.")
+            }
+            collectBooks(root, result)
         }
 
-        val result = mutableListOf<LibraryBook>()
-        collectBooks(root, result)
+        result += DeviceBookScanner.scan(context)
 
         return result
-            .distinctBy { it.uri }
+            .distinctBy { book ->
+                "${book.title.lowercase()}|${book.format.name}|${book.modifiedAt / 1000L}"
+            }
             .map { book ->
                 book.copy(isFavorite = isFavorite(context, book.uri))
             }
