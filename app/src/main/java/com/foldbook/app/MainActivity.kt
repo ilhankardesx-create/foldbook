@@ -518,6 +518,11 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             }.onSuccess { refreshed ->
                 if (refreshed != null) {
                     library = BundledGuide.withGuide(context, LibraryStore.mergePickedBooks(context, refreshed))
+                } else {
+                    library = BundledGuide.withGuide(
+                        context,
+                        LibraryStore.readPickedBooks(context)
+                    )
                 }
             }.onFailure {
                 libraryError = it.message ?: "Kitap yeniden adlandırılamadı."
@@ -595,6 +600,16 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                         LibraryStore.addPickedBook(context, uri)
                     }
                 }.onSuccess { result ->
+                    // Yeni seçilen kitabı mevcut rafın üzerine birleştirerek ekle.
+                    // Böylece sonraki klasör taraması hata verse bile eski kitaplar kaybolmaz.
+                    library = BundledGuide.withGuide(
+                        context,
+                        LibraryStore.mergePickedBooks(
+                            context,
+                            library.filterNot { BundledGuide.isGuide(it.uri) }
+                        )
+                    )
+
                     Toast.makeText(
                         context,
                         if (result.alreadyExists) {
