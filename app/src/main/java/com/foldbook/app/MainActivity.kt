@@ -11,10 +11,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -456,42 +453,6 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
         }
     }
 
-    fun scanDeviceBooks() {
-        scope.launch {
-            libraryLoading = true
-            libraryError = null
-
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    DeviceBookScanner.scan(context)
-                }
-            }.onSuccess { found ->
-                library = (library + found)
-                    .distinctBy { book ->
-                        "${book.title.lowercase()}|${book.format.name}|${book.modifiedAt / 1000L}"
-                    }
-                    .sortedWith(
-                        compareByDescending<LibraryBook> { it.modifiedAt }
-                            .thenBy { it.title.lowercase() }
-                    )
-
-                Toast.makeText(
-                    context,
-                    if (found.isEmpty()) {
-                        "Cihazda PDF veya EPUB bulunamadı."
-                    } else {
-                        "${found.size} kitap bulundu."
-                    },
-                    Toast.LENGTH_SHORT
-                ).show()
-            }.onFailure {
-                libraryError = it.message ?: "Cihazdaki kitaplar taranamadı."
-            }
-
-            libraryLoading = false
-        }
-    }
-
     fun openBook(book: LibraryBook) {
         LibraryStore.saveLastOpened(context, book.uri)
         LibraryStore.saveActiveBook(context, book)
@@ -608,44 +569,6 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
         }
     }
 
-    val allFilesAccessLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) {
-        if (
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
-            Environment.isExternalStorageManager()
-        ) {
-            scanDeviceBooks()
-        } else {
-            Toast.makeText(
-                context,
-                "Dosya erişim izni verilmedi.",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }
-
-    fun scanDeviceBooksWithPermission() {
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            !Environment.isExternalStorageManager()
-        ) {
-            val appSettings = Intent(
-                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                Uri.parse("package:${context.packageName}")
-            )
-            try {
-                allFilesAccessLauncher.launch(appSettings)
-            } catch (_: Exception) {
-                allFilesAccessLauncher.launch(
-                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                )
-            }
-        } else {
-            scanDeviceBooks()
-        }
-    }
-
     LaunchedEffect(Unit) {
         LibraryStore.savedFolder(context)?.let { scanFolder(it) }
 
@@ -692,7 +615,6 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             onRefresh = {
                 LibraryStore.savedFolder(context)?.let { scanFolder(it) }
             },
-            onScanDevice = ::scanDeviceBooksWithPermission,
             onBookClick = ::openBook,
             onToggleFavorite = ::toggleFavorite,
             onRenameBook = ::renameBook,
@@ -708,7 +630,6 @@ private fun LibraryScreen(
     error: String?,
     onChooseFolder: () -> Unit,
     onRefresh: () -> Unit,
-    onScanDevice: () -> Unit,
     onBookClick: (LibraryBook) -> Unit,
     onToggleFavorite: (LibraryBook) -> Unit,
     onRenameBook: (LibraryBook, String) -> Unit,
@@ -1165,20 +1086,6 @@ private fun LibraryScreen(
                                 }
                             }
 
-                            Button(
-                                onClick = onScanDevice,
-                                enabled = !isLoading,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    if (isLoading) {
-                                        "Taranıyor…"
-                                    } else {
-                                        "Cihazdaki Bütün Kitapları Bul"
-                                    },
-                                    textAlign = TextAlign.Center
-                                )
-                            }
 
                             Text(
                                 text = "Tema",
