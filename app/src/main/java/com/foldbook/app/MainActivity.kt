@@ -2084,7 +2084,11 @@ private fun BookSpread(
             settleAnimation.animateTo(
                 targetValue = if (shouldComplete) 1f else 0f,
                 animationSpec = tween(
-                    durationMillis = if (shouldComplete) 230 else 160,
+                    durationMillis = if (shouldComplete) {
+                        230
+                    } else {
+                        (180 + (start * 300f).toInt()).coerceIn(180, 280)
+                    },
                     easing = FastOutSlowInEasing
                 )
             )

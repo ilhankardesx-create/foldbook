@@ -912,7 +912,11 @@ private fun PdfSpread(
                     0f
                 },
                 animationSpec = tween(
-                    durationMillis = if (shouldComplete) 235 else 155,
+                    durationMillis = if (shouldComplete) {
+                        235
+                    } else {
+                        (180 + (start * 300f).toInt()).coerceIn(180, 280)
+                    },
                     easing = FastOutSlowInEasing
                 )
             )

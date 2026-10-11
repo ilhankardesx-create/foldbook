@@ -133,16 +133,22 @@ internal fun PageCurl(
                 return@Canvas
             }
 
-            // During the last tiny part of a cancelled turn, draw the exact live
-            // front page instead of a nearly-flat mesh. This makes the overlay and
-            // the resting page pixel-identical and removes the cancel flash.
-            if (p <= 0.025f) {
+            if (p <= 0.001f) {
                 drawLayer(frontLayer)
                 return@Canvas
             }
 
             val capturedFront = frontBitmap ?: return@Canvas
             val capturedBack = mirroredBackBitmap ?: return@Canvas
+
+            // A cancelled turn used to hard-switch from the mesh to the live page,
+            // which looked like a white flash. Keep the exact live page underneath
+            // and gradually fade the nearly-flat mesh away during the last 10%.
+            val cancelBlendEnd = 0.10f
+            val meshOpacity = smootherStep((p / cancelBlendEnd).coerceIn(0f, 1f))
+            if (p < cancelBlendEnd) {
+                drawLayer(frontLayer)
+            }
 
             val meshWidth = 52
             val meshHeight = 20
@@ -276,13 +282,13 @@ internal fun PageCurl(
                         (255f * (1f - shade)).toInt().coerceIn(200, 255)
 
                     frontColors[vertex] = android.graphics.Color.argb(
-                        (frontAlpha * 255f).toInt().coerceIn(0, 255),
+                        (frontAlpha * meshOpacity * 255f).toInt().coerceIn(0, 255),
                         brightness,
                         brightness,
                         brightness
                     )
                     backColors[vertex] = android.graphics.Color.argb(
-                        (backAlpha * 255f).toInt().coerceIn(0, 255),
+                        (backAlpha * meshOpacity * 255f).toInt().coerceIn(0, 255),
                         brightness,
                         brightness,
                         brightness
