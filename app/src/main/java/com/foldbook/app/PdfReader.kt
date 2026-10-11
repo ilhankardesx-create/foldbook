@@ -833,6 +833,7 @@ private fun PdfSpread(
     var dragProgress by remember { mutableFloatStateOf(0f) }
     var dragYFraction by remember { mutableFloatStateOf(0.68f) }
     var turnDirection by remember { mutableIntStateOf(0) }
+    var turnBaseIndex by remember { mutableIntStateOf(pageIndex) }
     var pageWidthPx by remember { mutableFloatStateOf(900f) }
     var pageHeightPx by remember { mutableFloatStateOf(1200f) }
     var settling by remember { mutableStateOf(false) }
@@ -965,6 +966,7 @@ private fun PdfSpread(
             }
         }
         settling = true
+        turnBaseIndex = pageIndex
         turnDirection = 1
         dragPx = -pageWidthPx
         dragProgress = 0f
@@ -1036,6 +1038,7 @@ private fun PdfSpread(
                     dragPx = 0f
                     dragProgress = 0f
                     dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)
+                    turnBaseIndex = pageIndex
                     turnDirection = 0
                 },
                 onDrag = { change, dragAmount ->
@@ -1114,7 +1117,7 @@ private fun PdfSpread(
                 document = document,
                 bookKey = bookKey,
                 bookTitle = bookTitle,
-                pageIndex = pageIndex,
+                pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,
                 turnDirection = turnDirection,
                 progress = progress,
                 curlY = dragYFraction,
@@ -1128,7 +1131,7 @@ private fun PdfSpread(
                 document = document,
                 bookKey = bookKey,
                 bookTitle = bookTitle,
-                pageIndex = pageIndex,
+                pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,
                 turnDirection = turnDirection,
                 progress = progress,
                 curlY = dragYFraction,

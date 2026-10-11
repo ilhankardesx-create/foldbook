@@ -242,7 +242,7 @@ internal fun PageCurl(
                     // not a permanent black center line.
                     val edgeOn = 1f - abs(cosine)
                     val shade =
-                        (0.04f * normalizedLift + 0.13f * edgeOn * wave)
+                        (0.13f * edgeOn * wave)
                             .coerceIn(0f, 0.18f)
                     val brightness =
                         (255f * (1f - shade)).toInt().coerceIn(200, 255)

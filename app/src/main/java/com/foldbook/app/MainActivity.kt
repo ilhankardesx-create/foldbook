@@ -184,7 +184,7 @@ private val LocalReaderPalette = staticCompositionLocalOf {
     ReaderPalette(
         background = Color(0xFFE8DFD0),
         page = Color(0xFFFFFCF5),
-        pageBack = Color(0xFFFFF7E8),
+        pageBack = Color(0xFFFFFCF5),
         text = Color(0xFF2E2923)
     )
 }
@@ -207,19 +207,19 @@ private fun readerPalette(theme: ReaderThemeOption): ReaderPalette = when (theme
     ReaderThemeOption.LIGHT -> ReaderPalette(
         background = Color(0xFFE8DFD0),
         page = Color(0xFFFFFCF5),
-        pageBack = Color(0xFFFFF7E8),
+        pageBack = Color(0xFFFFFCF5),
         text = Color(0xFF2E2923)
     )
     ReaderThemeOption.SEPIA -> ReaderPalette(
         background = Color(0xFFC9B38E),
         page = Color(0xFFF2DFC0),
-        pageBack = Color(0xFFEAD4B1),
+        pageBack = Color(0xFFF2DFC0),
         text = Color(0xFF433523)
     )
     ReaderThemeOption.DARK -> ReaderPalette(
         background = Color(0xFF111111),
         page = Color(0xFF232323),
-        pageBack = Color(0xFF1D1D1D),
+        pageBack = Color(0xFF232323),
         text = Color(0xFFE7E2D8)
     )
 }
@@ -2051,6 +2051,7 @@ private fun BookSpread(
     var dragProgress by remember { mutableFloatStateOf(0f) }
     var dragYFraction by remember { mutableFloatStateOf(0.5f) }
     var turnDirection by remember { mutableIntStateOf(0) }
+    var turnBaseIndex by remember { mutableIntStateOf(pageIndex) }
     var pageWidthPx by remember { mutableFloatStateOf(1f) }
     var pageHeightPx by remember { mutableFloatStateOf(1f) }
     var settling by remember { mutableStateOf(false) }
@@ -2139,6 +2140,7 @@ private fun BookSpread(
             canTurn(1)
         ) {
             settling = true
+            turnBaseIndex = pageIndex
             turnDirection = 1
             dragPx = -pageWidthPx
             dragProgress = 0f
@@ -2186,6 +2188,7 @@ private fun BookSpread(
                     dragPx = 0f
                     dragProgress = 0f
                     dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)
+                    turnBaseIndex = pageIndex
                     turnDirection = 0
                 },
                 onDrag = { change, dragAmount ->
@@ -2267,7 +2270,7 @@ private fun BookSpread(
             if (twoPage) {
                 TwoPageSpread(
                     pages = pages,
-                    pageIndex = pageIndex,
+                    pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,
                     turnDirection = turnDirection,
                     progress = progress,
                     curlY = dragYFraction
@@ -2275,7 +2278,7 @@ private fun BookSpread(
             } else {
                 SinglePageSpread(
                     pages = pages,
-                    pageIndex = pageIndex,
+                    pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,
                     turnDirection = turnDirection,
                     progress = progress,
                     curlY = dragYFraction
