@@ -4,53 +4,130 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
+import java.io.File
+import java.util.ArrayDeque
 
 /**
- * Best-effort discovery of PDF/EPUB files that Android exposes through MediaStore.
+ * Discovers PDF/EPUB books from shared storage.
  *
- * This intentionally does not request MANAGE_EXTERNAL_STORAGE. The manually selected
- * SAF folder remains the authoritative source, while this scanner adds books Android
- * already exposes to FoldBook (Downloads/indexed shared storage, including removable
- * volumes when available).
+ * Android 11+ uses MANAGE_EXTERNAL_STORAGE after the user explicitly grants it once,
+ * so FoldBook can walk normal shared-storage folders directly. Android 10 and below
+ * keep the previous MediaStore best-effort fallback.
  */
 object DeviceBookScanner {
 
     private data class Candidate(
         val book: LibraryBook,
-        val size: Long
+        val identity: String
     )
 
     fun scan(context: Context): List<LibraryBook> {
-        val candidates = mutableListOf<Candidate>()
-        val collections = linkedSetOf<Uri>()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            MediaStore.getExternalVolumeNames(context).forEach { volumeName ->
-                collections += MediaStore.Files.getContentUri(volumeName)
+        val books = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                error("Cihazdaki bütün kitapları taramak için dosya erişim izni gerekli.")
             }
+            scanFileSystem(context)
         } else {
-            collections += MediaStore.Files.getContentUri("external")
+            scanMediaStore(context)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            collections += MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        }
-
-        collections.forEach { collection ->
-            queryCollection(context, collection, candidates)
-        }
-
-        return candidates
-            .distinctBy { candidate ->
-                val book = candidate.book
-                "${book.title.lowercase()}|${candidate.size}|${book.modifiedAt}"
-            }
+        return books
+            .distinctBy { it.identity }
             .map { it.book }
             .sortedWith(
                 compareByDescending<LibraryBook> { it.modifiedAt }
                     .thenBy { it.title.lowercase() }
             )
+    }
+
+    private fun scanFileSystem(context: Context): List<Candidate> {
+        val roots = linkedSetOf<File>()
+        roots += Environment.getExternalStorageDirectory()
+
+        context.getExternalFilesDirs(null).forEach { appDir ->
+            var root: File? = appDir
+            repeat(4) { root = root?.parentFile }
+            if (root != null && root!!.exists() && root!!.canRead()) {
+                roots += root!!
+            }
+        }
+
+        val result = mutableListOf<Candidate>()
+        val visitedDirectories = hashSetOf<String>()
+        val stack = ArrayDeque<File>()
+        roots.filter { it.exists() && it.canRead() }.forEach { stack.add(it) }
+
+        while (stack.isNotEmpty()) {
+            val entry = stack.removeLast()
+
+            if (entry.isDirectory) {
+                val canonical = runCatching { entry.canonicalPath }.getOrNull()
+                    ?: entry.absolutePath
+                if (!visitedDirectories.add(canonical)) continue
+                if (shouldSkipDirectory(canonical)) continue
+
+                val children = runCatching { entry.listFiles() }.getOrNull() ?: continue
+                children.forEach { child -> stack.add(child) }
+                continue
+            }
+
+            if (!entry.isFile || !entry.canRead()) continue
+            val format = detectFormat(entry.name) ?: continue
+            val canonicalPath = runCatching { entry.canonicalPath }.getOrNull()
+                ?: entry.absolutePath
+            val uri = Uri.fromFile(entry)
+            val title = entry.name
+                .substringBeforeLast('.', entry.name)
+                .replace('_', ' ')
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .ifBlank { "İsimsiz Kitap" }
+
+            result += Candidate(
+                book = LibraryBook(
+                    title = title,
+                    uri = uri.toString(),
+                    format = format,
+                    modifiedAt = entry.lastModified(),
+                    isFavorite = LibraryStore.isFavorite(context, uri.toString())
+                ),
+                identity = canonicalPath
+            )
+        }
+
+        return result
+    }
+
+    private fun shouldSkipDirectory(path: String): Boolean {
+        val normalized = path.replace('\\', '/').lowercase()
+        return normalized.contains("/android/data/") ||
+            normalized.endsWith("/android/data") ||
+            normalized.contains("/android/obb/") ||
+            normalized.endsWith("/android/obb")
+    }
+
+    private fun detectFormat(name: String): BookFormat? {
+        return when {
+            name.endsWith(".pdf", ignoreCase = true) -> BookFormat.PDF
+            name.endsWith(".epub", ignoreCase = true) -> BookFormat.EPUB
+            else -> null
+        }
+    }
+
+    private fun scanMediaStore(context: Context): List<Candidate> {
+        val output = mutableListOf<Candidate>()
+        val collections = linkedSetOf<Uri>()
+        collections += MediaStore.Files.getContentUri("external")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            collections += MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        }
+
+        collections.forEach { collection ->
+            queryCollection(context, collection, output)
+        }
+        return output
     }
 
     private fun queryCollection(
@@ -65,31 +142,15 @@ object DeviceBookScanner {
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.SIZE
         )
-
-        val selection = buildString {
-            append("(")
-            append(MediaStore.MediaColumns.DISPLAY_NAME)
-            append(" LIKE ? OR ")
-            append(MediaStore.MediaColumns.DISPLAY_NAME)
-            append(" LIKE ? OR ")
-            append(MediaStore.MediaColumns.MIME_TYPE)
-            append(" = ? OR ")
-            append(MediaStore.MediaColumns.MIME_TYPE)
-            append(" = ?)")
-        }
-        val selectionArgs = arrayOf(
-            "%.pdf",
-            "%.epub",
-            "application/pdf",
-            "application/epub+zip"
-        )
+        val selection = "(${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.MediaColumns.MIME_TYPE} = ? OR ${MediaStore.MediaColumns.MIME_TYPE} = ?)"
+        val args = arrayOf("%.pdf", "%.epub", "application/pdf", "application/epub+zip")
 
         runCatching {
             context.contentResolver.query(
                 collection,
                 projection,
                 selection,
-                selectionArgs,
+                args,
                 "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
             )?.use { cursor ->
                 val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
@@ -103,13 +164,15 @@ object DeviceBookScanner {
                     val id = cursor.getLong(idIndex)
                     val name = if (nameIndex >= 0) cursor.getString(nameIndex).orEmpty() else ""
                     val mime = if (mimeIndex >= 0) cursor.getString(mimeIndex).orEmpty() else ""
-                    val modifiedSeconds = if (modifiedIndex >= 0) cursor.getLong(modifiedIndex) else 0L
+                    val modified = if (modifiedIndex >= 0) cursor.getLong(modifiedIndex) * 1000L else 0L
                     val size = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
-
-                    val format = detectFormat(name, mime) ?: continue
+                    val format = when {
+                        mime.equals("application/pdf", true) || name.endsWith(".pdf", true) -> BookFormat.PDF
+                        mime.equals("application/epub+zip", true) || name.endsWith(".epub", true) -> BookFormat.EPUB
+                        else -> null
+                    } ?: continue
                     val uri = ContentUris.withAppendedId(collection, id)
-                    val title = name
-                        .substringBeforeLast('.', name)
+                    val title = name.substringBeforeLast('.', name)
                         .replace('_', ' ')
                         .replace(Regex("\\s+"), " ")
                         .trim()
@@ -120,23 +183,13 @@ object DeviceBookScanner {
                             title = title,
                             uri = uri.toString(),
                             format = format,
-                            modifiedAt = modifiedSeconds * 1000L,
+                            modifiedAt = modified,
                             isFavorite = LibraryStore.isFavorite(context, uri.toString())
                         ),
-                        size = size
+                        identity = "${name.lowercase()}|$size|$modified"
                     )
                 }
             }
-        }
-    }
-
-    private fun detectFormat(name: String, mime: String): BookFormat? {
-        return when {
-            mime.equals("application/pdf", ignoreCase = true) -> BookFormat.PDF
-            mime.equals("application/epub+zip", ignoreCase = true) -> BookFormat.EPUB
-            name.endsWith(".pdf", ignoreCase = true) -> BookFormat.PDF
-            name.endsWith(".epub", ignoreCase = true) -> BookFormat.EPUB
-            else -> null
         }
     }
 }
