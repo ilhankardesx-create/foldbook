@@ -915,7 +915,9 @@ private fun PdfSpread(
                 },
                 animationSpec = tween(
                     durationMillis = if (shouldComplete) {
-                        235
+                        val target = if (twoPage) 0.985f else 1f
+                        val remaining = (target - start).coerceAtLeast(0f)
+                        (245 + (remaining * 270f).toInt()).coerceIn(255, 430)
                     } else {
                         (180 + (start * 300f).toInt()).coerceIn(180, 280)
                     },
@@ -1095,7 +1097,9 @@ private fun PdfSpread(
                             canTurn(direction) && turnAssetsReady(direction) -> {
                                 dragPx = proposed
                                 turnDirection = direction
-                                dragProgress = (abs(dragPx) / pageWidthPx).coerceIn(0f, 1f)
+                                // Preserve a release tail even on a very fast fling.
+                                dragProgress = (abs(dragPx) / pageWidthPx)
+                                    .coerceIn(0f, 0.88f)
                             }
                             canTurn(direction) -> {
                                 warmTurnAssets(direction)

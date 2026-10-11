@@ -2087,7 +2087,10 @@ private fun BookSpread(
                 targetValue = if (shouldComplete) 1f else 0f,
                 animationSpec = tween(
                     durationMillis = if (shouldComplete) {
-                        230
+                        // Leave more time for a half-finished sheet to settle.
+                        // Near the end it stays shorter, but still has a visible soft landing.
+                        val remaining = (1f - start).coerceIn(0f, 1f)
+                        (240 + (remaining * 260f).toInt()).coerceIn(250, 430)
                     } else {
                         (180 + (start * 300f).toInt()).coerceIn(180, 280)
                     },
@@ -2240,7 +2243,10 @@ private fun BookSpread(
                         if (direction == 0 || canTurn(direction)) {
                             dragPx = proposed
                             turnDirection = direction
-                            dragProgress = (abs(dragPx) / pageWidthPx).coerceIn(0f, 1f)
+                            // Never let a finger fling finish the whole sheet in one input frame.
+                            // Keep a visible release tail so even a very fast swipe still curls to rest.
+                            dragProgress = (abs(dragPx) / pageWidthPx)
+                                .coerceIn(0f, 0.88f)
                         } else {
                             dragPx = 0f
                             dragProgress = 0f
