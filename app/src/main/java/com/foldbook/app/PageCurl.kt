@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -23,26 +24,23 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 /**
  * FoldBook page-curl renderer.
  *
- * This renderer snapshots the two faces of the page and bends the whole sheet as
- * one continuous bitmap mesh. It deliberately avoids the old vertical-strip
- * renderer: no independent panels are translated or scaled, so text cannot break
- * into columns while the page is moving.
+ * The sheet is rendered as one continuous bitmap mesh. The fold does NOT rotate the
+ * whole page at once. Instead a crease travels from the free edge toward the spine:
  *
- * Geometry model:
- * - the spine is the fixed edge;
- * - the free edge travels from one side of the book to the other;
- * - each mesh column gets a tangent angle and the x/z position is integrated along
- *   the sheet, producing a continuous cylindrical bend;
- * - at the halfway point the sheet is nearly edge-on, then the reverse face is
- *   used. The reverse snapshot is pre-mirrored so text is readable after crossing
- *   the spine.
+ * - the part before the crease stays flat,
+ * - a narrow cylindrical band forms the physical curl,
+ * - the part after the band lies on the opposite side of the fold.
+ *
+ * This keeps a real page-sized sheet visible throughout the gesture instead of
+ * collapsing the complete page into the thin vertical ribbon seen in the previous
+ * mesh prototype.
  */
 @Composable
 internal fun PageCurl(
@@ -64,8 +62,9 @@ internal fun PageCurl(
     var frontBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var mirroredBackBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    // PageCurl exists only while a turn is active. Record one frame first, then
-    // snapshot both page faces once for the complete gesture/settle animation.
+    // PageCurl is created only while a turn is active. Let both composables record
+    // one frame, then freeze their bitmaps for the complete gesture. This prevents
+    // text layout from changing while the mesh is moving.
     LaunchedEffect(frontLayer, backLayer) {
         withFrameNanos { }
 
@@ -90,12 +89,11 @@ internal fun PageCurl(
 
     Box(
         modifier = modifier.graphicsLayer {
-            // Two-page turns intentionally paint past the half-page bounds and
-            // across the center spine.
+            // Fold/two-page turns need to draw outside the half-page box and over
+            // the opposite side of the center spine.
             clip = false
         }
     ) {
-        // Record the front face without drawing it directly.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -108,7 +106,6 @@ internal fun PageCurl(
             front()
         }
 
-        // Record the reverse face separately.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -137,127 +134,211 @@ internal fun PageCurl(
             val capturedFront = frontBitmap
             val capturedBack = mirroredBackBitmap
             if (capturedFront == null || capturedBack == null) {
-                // Snapshot becomes available after the first recorded frame. Keep
-                // that first frame stable instead of showing a partially-built curl.
                 drawLayer(frontLayer)
                 return@Canvas
             }
 
-            val meshWidth = 28
-            val meshHeight = 14
+            // Enough columns for a smooth cylinder, but still inexpensive on large
+            // Fold displays. More rows allow a slightly diagonal crease that follows
+            // the user's vertical finger position.
+            val meshWidth = 34
+            val meshHeight = 16
             val columnCount = meshWidth + 1
             val rowCount = meshHeight + 1
+            val vertexCount = columnCount * rowCount
 
-            // Distance-from-spine positions and virtual height (z) for each column.
-            val xAlongSheet = FloatArray(columnCount)
-            val zAlongSheet = FloatArray(columnCount)
+            val verts = FloatArray(vertexCount * 2)
+            val frontColors = IntArray(vertexCount)
+            val backColors = IntArray(vertexCount)
 
-            val baseAngle = PI.toFloat() * p
             val wave = sin(PI.toFloat() * p).coerceAtLeast(0f)
-            // Curvature vanishes at both resting states and is strongest mid-turn.
-            val bendAmplitude = 1.05f * wave
-            val segmentLength = width / meshWidth
 
-            var integratedX = 0f
-            var integratedZ = 0f
-            xAlongSheet[0] = 0f
-            zAlongSheet[0] = 0f
-
-            for (i in 1..meshWidth) {
-                val mid = (i - 0.5f) / meshWidth
-                val localAngle = baseAngle + bendAmplitude * (mid - 0.5f)
-                integratedX += segmentLength * cos(localAngle)
-                integratedZ += segmentLength * sin(localAngle)
-                xAlongSheet[i] = integratedX
-                zAlongSheet[i] = integratedZ
+            // The crease itself moves across the complete page. Forward starts at
+            // the outer RIGHT edge and ends at the spine/LEFT edge. Backward is the
+            // exact mirror of that geometry.
+            val baseCrease = if (safeDirection == 1) {
+                width * (1f - p)
+            } else {
+                width * p
             }
 
-            val verts = FloatArray(columnCount * rowCount * 2)
+            // Source width consumed by the cylindrical bend. It grows naturally in
+            // the middle of the gesture and almost disappears at both resting states.
+            val bandWidth = max(
+                width * 0.008f,
+                width * 0.19f * wave
+            )
+            val radius = bandWidth / PI.toFloat()
             val touchCenterY = height * touchY
-            var vertexOffset = 0
 
+            var vertex = 0
             for (row in 0..meshHeight) {
                 val v = row.toFloat() / meshHeight
                 val sourceY = height * v
 
+                // A real corner pull does not produce a perfectly vertical fold.
+                // Keep this subtle: enough to stop the sheet looking like a door,
+                // but not enough to distort the text layout.
+                val rowSkew =
+                    (v - touchY) * width * 0.075f * wave *
+                        if (safeDirection == 1) 1f else -1f
+
+                val crease = (baseCrease + rowSkew)
+                    .coerceIn(-bandWidth * 0.35f, width + bandWidth * 0.35f)
+                val bandStart = crease - bandWidth / 2f
+                val bandEnd = crease + bandWidth / 2f
+
                 for (column in 0..meshWidth) {
                     val u = column.toFloat() / meshWidth
+                    val sourceX = width * u
 
-                    val distanceIndex = if (safeDirection == 1) {
-                        column
+                    var outputX: Float
+                    var lift = 0f
+                    var frontAlpha: Float
+                    var backAlpha: Float
+
+                    if (safeDirection == 1) {
+                        when {
+                            // Still-flat part connected to the center spine.
+                            sourceX <= bandStart -> {
+                                outputX = sourceX
+                                frontAlpha = 1f
+                                backAlpha = 0f
+                            }
+
+                            // Already turned part. Reflection around the crease lets
+                            // it cross x=0 and continue naturally onto the left page.
+                            sourceX >= bandEnd -> {
+                                outputX = 2f * crease - sourceX
+                                frontAlpha = 0f
+                                backAlpha = 1f
+                            }
+
+                            // Continuous half-cylinder. Its derivative is +1 at the
+                            // flat entrance and -1 at the turned exit, so there is no
+                            // panel seam between mesh regions.
+                            else -> {
+                                val t = ((sourceX - bandStart) / bandWidth)
+                                    .coerceIn(0f, 1f)
+                                val angle = PI.toFloat() * t
+                                outputX = bandStart + radius * sin(angle)
+                                lift = sin(angle).coerceAtLeast(0f)
+
+                                val frontWeight = cos(angle * 0.5f)
+                                val backWeight = sin(angle * 0.5f)
+                                frontAlpha = frontWeight * frontWeight
+                                backAlpha = backWeight * backWeight
+                            }
+                        }
                     } else {
-                        meshWidth - column
+                        when {
+                            // Turned section on a backward LEFT->RIGHT page turn.
+                            sourceX <= bandStart -> {
+                                outputX = 2f * crease - sourceX
+                                frontAlpha = 0f
+                                backAlpha = 1f
+                            }
+
+                            // Flat part still attached to the right/spine edge.
+                            sourceX >= bandEnd -> {
+                                outputX = sourceX
+                                frontAlpha = 1f
+                                backAlpha = 0f
+                            }
+
+                            else -> {
+                                val t = ((sourceX - bandStart) / bandWidth)
+                                    .coerceIn(0f, 1f)
+                                val angle = PI.toFloat() * t
+                                outputX = bandEnd - radius * sin(angle)
+                                lift = sin(angle).coerceAtLeast(0f)
+
+                                // At t=0 we are on the turned/back face; at t=1 we
+                                // rejoin the still-flat/front face.
+                                val frontWeight = sin(angle * 0.5f)
+                                val backWeight = cos(angle * 0.5f)
+                                frontAlpha = frontWeight * frontWeight
+                                backAlpha = backWeight * backWeight
+                            }
+                        }
                     }
 
-                    val sheetX = xAlongSheet[distanceIndex]
-                    val sheetZ = zAlongSheet[distanceIndex]
-                    val lift = (abs(sheetZ) / width).coerceIn(0f, 1f)
+                    // Lift only the cylindrical band. Flat and already-turned paper
+                    // remains full height. The compression is centered around the
+                    // actual finger height, so dragging high/low changes the curl feel.
+                    val verticalCompression = 1f - (0.075f * lift)
+                    var outputY =
+                        touchCenterY + (sourceY - touchCenterY) * verticalCompression
 
-                    val outputX = if (safeDirection == 1) {
-                        // Forward: fixed edge is the left/spine edge.
-                        sheetX
-                    } else {
-                        // Backward: mirror the same geometry around the right edge.
-                        width - sheetX
+                    // A tiny additional bow near the free side keeps top/bottom edges
+                    // from looking ruler-straight while the paper is lifted.
+                    val freeSideWeight = if (safeDirection == 1) u else (1f - u)
+                    outputY +=
+                        (touchY - 0.5f) * height * 0.025f * lift * freeSideWeight
+
+                    val offset = vertex * 2
+                    verts[offset] = outputX
+                    verts[offset + 1] = outputY
+
+                    fun whiteWithAlpha(alpha: Float): Int {
+                        return android.graphics.Color.argb(
+                            (alpha.coerceIn(0f, 1f) * 255f).toInt(),
+                            255,
+                            255,
+                            255
+                        )
                     }
 
-                    // A lifted sheet gets a small perspective squeeze around the
-                    // user's touch height. This bows the top/bottom edges smoothly
-                    // instead of creating vertical rectangular panels.
-                    val perspectiveY = 1f - (0.11f * lift)
-                    var outputY = touchCenterY + (sourceY - touchCenterY) * perspectiveY
-
-                    // Subtle corner bias: dragging high/low makes the free side lean
-                    // toward that finger without changing the page layout at rest.
-                    val freeEdgeWeight = if (safeDirection == 1) u else (1f - u)
-                    outputY += (touchY - 0.5f) * height * 0.045f * lift * freeEdgeWeight
-
-                    verts[vertexOffset++] = outputX
-                    verts[vertexOffset++] = outputY
+                    frontColors[vertex] = whiteWithAlpha(frontAlpha)
+                    backColors[vertex] = whiteWithAlpha(backAlpha)
+                    vertex++
                 }
             }
 
-            val bitmapToDraw = if (p < 0.5f) capturedFront else capturedBack
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
                 isDither = true
             }
 
             drawIntoCanvas { composeCanvas ->
-                composeCanvas.nativeCanvas.drawBitmapMesh(
-                    bitmapToDraw,
+                val native = composeCanvas.nativeCanvas
+
+                // Front first, reverse face second. The physically lifted/turned
+                // section therefore sits over the still-flat paper where their 2D
+                // projections overlap around the fold.
+                native.drawBitmapMesh(
+                    capturedFront,
                     meshWidth,
                     meshHeight,
                     verts,
                     0,
-                    null,
+                    frontColors,
+                    0,
+                    paint
+                )
+                native.drawBitmapMesh(
+                    capturedBack,
+                    meshWidth,
+                    meshHeight,
+                    verts,
+                    0,
+                    backColors,
                     0,
                     paint
                 )
             }
 
-            // Very light moving-edge shadow only. The center spine itself is drawn
-            // by BookSpine/PdfBookSpine; adding another dark band here caused the
-            // heavy black seam seen in the previous test build.
-            val freeEdgeColumn = if (safeDirection == 1) meshWidth else 0
-            val freeIndex = if (safeDirection == 1) meshWidth else meshWidth
-            val freeX = if (safeDirection == 1) {
-                xAlongSheet[freeIndex]
+            // One very soft crease cue. The normal center-spine shadow is already
+            // drawn by BookSpine/PdfBookSpine, so avoid stacking a dark second line.
+            val shadowAlpha = if (crossSpine) {
+                0.018f + 0.030f * wave
             } else {
-                width - xAlongSheet[freeIndex]
+                0.022f + 0.038f * wave
             }
-            val freeLift = (abs(zAlongSheet[freeIndex]) / width).coerceIn(0f, 1f)
-            val edgeScaleY = 1f - 0.11f * freeLift
-            val edgeTop = touchCenterY + (0f - touchCenterY) * edgeScaleY
-            val edgeBottom = touchCenterY + (height - touchCenterY) * edgeScaleY
-
-            @Suppress("UNUSED_VARIABLE")
-            val keepForGeometryReadability = freeEdgeColumn
-
             drawLine(
-                color = Color.Black.copy(alpha = 0.025f + 0.055f * wave),
-                start = androidx.compose.ui.geometry.Offset(freeX, edgeTop),
-                end = androidx.compose.ui.geometry.Offset(freeX, edgeBottom),
-                strokeWidth = 1.4f + 2.2f * wave
+                color = Color.Black.copy(alpha = shadowAlpha),
+                start = Offset(baseCrease.coerceIn(0f, width), 0f),
+                end = Offset(baseCrease.coerceIn(0f, width), height),
+                strokeWidth = 1.1f + 1.5f * wave
             )
         }
     }
