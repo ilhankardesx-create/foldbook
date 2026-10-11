@@ -1,0 +1,133 @@
+name: Fix Curl Handoff
+
+on:
+  push:
+    branches: [ "development" ]
+    paths: [ ".github/workflows/fix-curl-handoff.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: development
+
+      - name: Freeze turn indices and unify paper tone
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"{label} not found")
+              return text.replace(old, new, 1)
+
+          # EPUB reader
+          main = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          s = main.read_text()
+
+          s = replace_once(
+              s,
+              '    var turnDirection by remember { mutableIntStateOf(0) }\n    var pageWidthPx by remember { mutableFloatStateOf(1f) }',
+              '    var turnDirection by remember { mutableIntStateOf(0) }\n    var turnBaseIndex by remember { mutableIntStateOf(pageIndex) }\n    var pageWidthPx by remember { mutableFloatStateOf(1f) }',
+              'EPUB turn state'
+          )
+
+          s = replace_once(
+              s,
+              '                    dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)\n                    turnDirection = 0',
+              '                    dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)\n                    turnBaseIndex = pageIndex\n                    turnDirection = 0',
+              'EPUB drag start'
+          )
+
+          s = replace_once(
+              s,
+              '            settling = true\n            turnDirection = 1\n            dragPx = -pageWidthPx',
+              '            settling = true\n            turnBaseIndex = pageIndex\n            turnDirection = 1\n            dragPx = -pageWidthPx',
+              'EPUB auto turn'
+          )
+
+          s = replace_once(
+              s,
+              '                TwoPageSpread(\n                    pages = pages,\n                    pageIndex = pageIndex,',
+              '                TwoPageSpread(\n                    pages = pages,\n                    pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,',
+              'EPUB two-page spread call'
+          )
+
+          s = replace_once(
+              s,
+              '                SinglePageSpread(\n                    pages = pages,\n                    pageIndex = pageIndex,',
+              '                SinglePageSpread(\n                    pages = pages,\n                    pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,',
+              'EPUB single-page spread call'
+          )
+
+          # Make the back of the sheet the exact same paper tone as the live page.
+          s = s.replace('pageBack = Color(0xFFFFF7E8)', 'pageBack = Color(0xFFFFFCF5)')
+          s = s.replace('pageBack = Color(0xFFEAD4B1)', 'pageBack = Color(0xFFF2DFC0)')
+          s = s.replace('pageBack = Color(0xFF1D1D1D)', 'pageBack = Color(0xFF232323)')
+          main.write_text(s)
+
+          # PDF reader
+          pdf = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          s = pdf.read_text()
+
+          s = replace_once(
+              s,
+              '    var turnDirection by remember { mutableIntStateOf(0) }\n    var pageWidthPx by remember { mutableFloatStateOf(900f) }',
+              '    var turnDirection by remember { mutableIntStateOf(0) }\n    var turnBaseIndex by remember { mutableIntStateOf(pageIndex) }\n    var pageWidthPx by remember { mutableFloatStateOf(900f) }',
+              'PDF turn state'
+          )
+
+          s = replace_once(
+              s,
+              '                    dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)\n                    turnDirection = 0',
+              '                    dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)\n                    turnBaseIndex = pageIndex\n                    turnDirection = 0',
+              'PDF drag start'
+          )
+
+          s = replace_once(
+              s,
+              '        settling = true\n        turnDirection = 1\n        dragPx = -pageWidthPx',
+              '        settling = true\n        turnBaseIndex = pageIndex\n        turnDirection = 1\n        dragPx = -pageWidthPx',
+              'PDF auto turn'
+          )
+
+          s = replace_once(
+              s,
+              '            PdfTwoPageSpread(\n                document = document,\n                bookKey = bookKey,\n                bookTitle = bookTitle,\n                pageIndex = pageIndex,',
+              '            PdfTwoPageSpread(\n                document = document,\n                bookKey = bookKey,\n                bookTitle = bookTitle,\n                pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,',
+              'PDF two-page spread call'
+          )
+
+          s = replace_once(
+              s,
+              '            PdfSinglePageSpread(\n                document = document,\n                bookKey = bookKey,\n                bookTitle = bookTitle,\n                pageIndex = pageIndex,',
+              '            PdfSinglePageSpread(\n                document = document,\n                bookKey = bookKey,\n                bookTitle = bookTitle,\n                pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,',
+              'PDF single-page spread call'
+          )
+          pdf.write_text(s)
+
+          # Keep shading only in the physical bend. The already-turned flat paper
+          # must have the same tone as the page underneath.
+          curl = Path('app/src/main/java/com/foldbook/app/PageCurl.kt')
+          s = curl.read_text()
+          s = replace_once(
+              s,
+              '                    val shade =\n                        (0.04f * normalizedLift + 0.13f * edgeOn * wave)\n                            .coerceIn(0f, 0.18f)',
+              '                    val shade =\n                        (0.13f * edgeOn * wave)\n                            .coerceIn(0f, 0.18f)',
+              'curl shading'
+          )
+          curl.write_text(s)
+          PY
+
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt \
+                  app/src/main/java/com/foldbook/app/PdfReader.kt \
+                  app/src/main/java/com/foldbook/app/PageCurl.kt
+          git commit -m "Fix page-turn handoff flicker and paper tone"
+          git push origin HEAD:development
