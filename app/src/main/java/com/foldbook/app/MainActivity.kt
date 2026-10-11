@@ -2525,6 +2525,7 @@ private fun TurningPage(
             BookPage(
                 page = frontPage,
                 pageNumber = frontNumber,
+                showFrameShadow = false,
                 modifier = Modifier.fillMaxSize()
             )
         },
@@ -2533,6 +2534,7 @@ private fun TurningPage(
                 page = backPage ?: frontPage,
                 pageNumber = if (backPage != null) backNumber else frontNumber,
                 isBackSide = true,
+                showFrameShadow = false,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -2567,6 +2569,7 @@ private fun BookPage(
     page: ReaderPage?,
     pageNumber: Int,
     isBackSide: Boolean = false,
+    showFrameShadow: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalReaderPalette.current
@@ -2654,10 +2657,15 @@ private fun BookPage(
         ""
     }
 
+    val pageShape = RoundedCornerShape(10.dp)
+    val framedModifier = if (showFrameShadow) {
+        modifier.shadow(7.dp, pageShape)
+    } else {
+        modifier
+    }
+
     Surface(
-        modifier = modifier
-            .shadow(7.dp, RoundedCornerShape(10.dp))
-            .clip(RoundedCornerShape(10.dp)),
+        modifier = framedModifier.clip(pageShape),
         color = if (isBackSide) palette.pageBack else palette.page
     ) {
         Column(

@@ -1469,6 +1469,7 @@ private fun PdfSingleTurningPage(
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
+                showFrameShadow = false,
                 modifier = Modifier.fillMaxSize()
             )
         },
@@ -1481,6 +1482,7 @@ private fun PdfSingleTurningPage(
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
+                showFrameShadow = false,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -1531,6 +1533,7 @@ private fun PdfTurningPage(
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
+                showFrameShadow = false,
                 modifier = Modifier.fillMaxSize()
             )
         },
@@ -1543,6 +1546,7 @@ private fun PdfTurningPage(
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
+                showFrameShadow = false,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -1687,12 +1691,18 @@ private fun PdfFrozenPage(
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
+    showFrameShadow: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val pageShape = RoundedCornerShape(7.dp)
+    val framedModifier = if (showFrameShadow) {
+        modifier.shadow(6.dp, pageShape)
+    } else {
+        modifier
+    }
+
     Surface(
-        modifier = modifier
-            .shadow(6.dp, RoundedCornerShape(7.dp))
-            .clip(RoundedCornerShape(7.dp)),
+        modifier = framedModifier.clip(pageShape),
         color = when (theme) {
             ReaderThemeOption.LIGHT -> Color(0xFFF5F2EA)
             ReaderThemeOption.SEPIA -> Color(0xFFE7D3B2)
