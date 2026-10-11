@@ -2473,10 +2473,16 @@ private fun SinglePageSpread(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 3.dp, vertical = 4.dp)
+            .shadow(
+                elevation = 7.dp,
+                shape = RoundedCornerShape(10.dp),
+                clip = false
+            )
     ) {
         BookPage(
             page = pages.getOrNull(targetIndex),
             pageNumber = targetIndex + 1,
+            showFrameShadow = false,
             modifier = Modifier.fillMaxSize()
         )
 
