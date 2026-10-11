@@ -1,0 +1,52 @@
+name: Apply Device Corners
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/apply-device-corners.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Apply adaptive corners to single-page readers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          s = main.read_text(encoding='utf-8')
+          old = '''    Box(\n        modifier = Modifier\n            .fillMaxSize()\n            .padding(horizontal = 3.dp, vertical = 4.dp)\n            .shadow(\n                elevation = 7.dp,\n                shape = RoundedCornerShape(10.dp),\n                clip = false\n            )\n    ) {'''
+          new = '''    val screenShape = singlePageDeviceShape(\n        fallbackRadius = 10.dp,\n        horizontalInset = 3.dp,\n        verticalInset = 4.dp\n    )\n\n    Box(\n        modifier = Modifier\n            .fillMaxSize()\n            .padding(horizontal = 3.dp, vertical = 4.dp)\n            .shadow(\n                elevation = 7.dp,\n                shape = screenShape,\n                clip = false\n            )\n            .clip(screenShape)\n    ) {'''
+          if old not in s:
+              raise SystemExit('EPUB single-page frame block not found')
+          s = s.replace(old, new, 1)
+          main.write_text(s, encoding='utf-8')
+
+          pdf = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          p = pdf.read_text(encoding='utf-8')
+          old_pdf = '''    Box(\n        modifier = Modifier\n            .fillMaxSize()\n            .padding(horizontal = 2.dp, vertical = 3.dp)\n    ) {\n        PdfPage('''
+          new_pdf = '''    val screenShape = singlePageDeviceShape(\n        fallbackRadius = 7.dp,\n        horizontalInset = 2.dp,\n        verticalInset = 3.dp\n    )\n\n    Box(\n        modifier = Modifier\n            .fillMaxSize()\n            .padding(horizontal = 2.dp, vertical = 3.dp)\n            .clip(screenShape)\n    ) {\n        PdfPage('''
+          if old_pdf not in p:
+              raise SystemExit('PDF single-page frame block not found')
+          p = p.replace(old_pdf, new_pdf, 1)
+          pdf.write_text(p, encoding='utf-8')
+          PY
+
+      - name: Commit adaptive single-page corners
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt app/src/main/java/com/foldbook/app/PdfReader.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Match single-page corners to device screen"
+          git push origin development
