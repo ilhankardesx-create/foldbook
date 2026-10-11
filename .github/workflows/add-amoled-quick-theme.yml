@@ -1,0 +1,56 @@
+name: Add AMOLED Quick Theme
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/add-amoled-quick-theme.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Add AMOLED to reader quick theme row
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          s = p.read_text(encoding='utf-8')
+
+          # Find a theme-option list that still has only Açık/Sepya/Koyu.
+          pattern = re.compile(
+              r'(ReaderThemeOption\.LIGHT\s+to\s+"Açık",\s*\n'
+              r'\s*ReaderThemeOption\.SEPIA\s+to\s+"Sepya",\s*\n'
+              r'\s*ReaderThemeOption\.DARK\s+to\s+"Koyu")'
+              r'(?!,\s*\n\s*ReaderThemeOption\.AMOLED\s+to\s+"AMOLED")'
+          )
+
+          matches = list(pattern.finditer(s))
+          if not matches:
+              raise SystemExit('Quick theme list without AMOLED not found')
+
+          # Only patch the first still-incomplete list; the settings list already has AMOLED.
+          m = matches[0]
+          replacement = m.group(1) + ',\n                                    ReaderThemeOption.AMOLED to "AMOLED"'
+          s = s[:m.start()] + replacement + s[m.end():]
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit quick theme fix
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Add AMOLED to reader quick theme"
+          git push origin development
