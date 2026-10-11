@@ -517,7 +517,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 }
             }.onSuccess { refreshed ->
                 if (refreshed != null) {
-                    library = refreshed
+                    library = BundledGuide.withGuide(context, refreshed)
                 }
             }.onFailure {
                 libraryError = it.message ?: "Kitap yeniden adlandırılamadı."
@@ -541,7 +541,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
                 }
             }.onSuccess { refreshed ->
                 if (refreshed != null) {
-                    library = refreshed
+                    library = BundledGuide.withGuide(context, refreshed)
                 } else {
                     library = library.filterNot { it.uri == book.uri }
                 }
