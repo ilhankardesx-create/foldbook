@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.CornerRadius
@@ -916,12 +917,16 @@ private fun PdfSpread(
                 ).coerceIn(0, document.pageCount - 1)
                 Snapshot.withMutableSnapshot {
                     pageIndex = newIndex
+                }
+                onPageChanged(newIndex)
+                // Let the destination page settle behind the frozen curl.
+                withFrameNanos { }
+                Snapshot.withMutableSnapshot {
                     dragPx = 0f
                     dragProgress = 0f
                     turnDirection = 0
                     settling = false
                 }
-                onPageChanged(newIndex)
             } else {
                 Snapshot.withMutableSnapshot {
                     dragPx = 0f
@@ -974,13 +979,17 @@ private fun PdfSpread(
         )
         val newIndex = (pageIndex + step).coerceIn(0, document.pageCount - 1)
         Snapshot.withMutableSnapshot {
-            pageIndex = newIndex
-            dragPx = 0f
-            dragProgress = 0f
-            turnDirection = 0
-            settling = false
-        }
-        onPageChanged(newIndex)
+                    pageIndex = newIndex
+                }
+                onPageChanged(newIndex)
+                // Let the destination page settle behind the frozen curl.
+                withFrameNanos { }
+                Snapshot.withMutableSnapshot {
+                    dragPx = 0f
+                    dragProgress = 0f
+                    turnDirection = 0
+                    settling = false
+                }
         settleAnimation.snapTo(0f)
     }
 

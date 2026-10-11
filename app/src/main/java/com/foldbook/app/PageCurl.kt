@@ -156,8 +156,10 @@ internal fun PageCurl(
 
                 // Reference animation has a gently diagonal fold that follows the
                 // finger height. Keep it subtle so text stays readable.
+                // Vertical finger movement changes the curl angle in real time.
+                val tilt = (touchY - 0.5f) * 0.58f * wave
                 val rowSkew =
-                    (v - touchY) * 0.11f * wave *
+                    (v - 0.5f) * tilt *
                         if (forward) 1f else -1f
                 val localCenter = bendCenter + rowSkew
                 val bendStart = localCenter - halfBend
@@ -221,7 +223,7 @@ internal fun PageCurl(
                     // fold leans with the finger instead of remaining ruler-straight.
                     val freeWeight = distance
                     outputY +=
-                        (touchY - 0.5f) * height * 0.030f *
+                        (touchY - 0.5f) * height * 0.050f *
                             normalizedLift * freeWeight
 
                     val offset = vertex * 2

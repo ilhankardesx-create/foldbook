@@ -81,6 +81,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -2088,14 +2089,17 @@ private fun BookSpread(
 
                 Snapshot.withMutableSnapshot {
                     pageIndex = newIndex
+                }
+                onPageChanged(newIndex)
+                // Keep the frozen final curl above the newly composed page for one frame.
+                withFrameNanos { }
+                Snapshot.withMutableSnapshot {
                     dragPx = 0f
                     dragProgress = 0f
                     dragYFraction = 0.5f
                     turnDirection = 0
                     settling = false
                 }
-
-                onPageChanged(newIndex)
                 settleAnimation.snapTo(0f)
             } else {
                 Snapshot.withMutableSnapshot {
@@ -2153,15 +2157,18 @@ private fun BookSpread(
                 .coerceIn(0, pages.lastIndex.coerceAtLeast(0))
 
             Snapshot.withMutableSnapshot {
-                pageIndex = newIndex
-                dragPx = 0f
-                dragProgress = 0f
-                dragYFraction = 0.5f
-                turnDirection = 0
-                settling = false
-            }
-
-            onPageChanged(newIndex)
+                    pageIndex = newIndex
+                }
+                onPageChanged(newIndex)
+                // Keep the frozen final curl above the newly composed page for one frame.
+                withFrameNanos { }
+                Snapshot.withMutableSnapshot {
+                    dragPx = 0f
+                    dragProgress = 0f
+                    dragYFraction = 0.5f
+                    turnDirection = 0
+                    settling = false
+                }
             settleAnimation.snapTo(0f)
         }
     }
