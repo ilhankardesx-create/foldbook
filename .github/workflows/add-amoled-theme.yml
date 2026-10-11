@@ -1,0 +1,75 @@
+name: Add AMOLED Theme
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/add-amoled-theme.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Add AMOLED theme only
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # LibraryStore: add enum value only.
+          p = Path('app/src/main/java/com/foldbook/app/LibraryStore.kt')
+          s = p.read_text(encoding='utf-8')
+          old = 'enum class ReaderThemeOption { LIGHT, SEPIA, DARK }'
+          new = 'enum class ReaderThemeOption { LIGHT, SEPIA, DARK, AMOLED }'
+          if old not in s:
+              raise SystemExit('ReaderThemeOption enum pattern not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          # EPUB / reader palette + settings selector.
+          p = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''    ReaderThemeOption.DARK -> ReaderPalette(\n        background = Color(0xFF111111),\n        page = Color(0xFF232323),\n        pageBack = Color(0xFF232323),\n        text = Color(0xFFE7E2D8)\n    )\n}'''
+          new = '''    ReaderThemeOption.DARK -> ReaderPalette(\n        background = Color(0xFF111111),\n        page = Color(0xFF232323),\n        pageBack = Color(0xFF232323),\n        text = Color(0xFFE7E2D8)\n    )\n    ReaderThemeOption.AMOLED -> ReaderPalette(\n        background = Color.Black,\n        page = Color.Black,\n        pageBack = Color.Black,\n        text = Color(0xFFF5F5F5)\n    )\n}'''
+          if old not in s:
+              raise SystemExit('Reader palette pattern not found')
+          s = s.replace(old, new, 1)
+
+          old = '''                                listOf(\n                                    ReaderThemeOption.LIGHT to "Açık",\n                                    ReaderThemeOption.SEPIA to "Sepya",\n                                    ReaderThemeOption.DARK to "Koyu"\n                                ).forEach { (option, label) ->\n                                    Button(\n                                        onClick = {\n                                            selectedTheme = option\n                                            LibraryStore.saveReaderTheme(context, option)\n                                        }\n                                    ) {\n                                        Text(\n                                            if (selectedTheme == option) "✓ $label" else label\n                                        )\n                                    }\n                                }'''
+          new = '''                                listOf(\n                                    ReaderThemeOption.LIGHT to "Açık",\n                                    ReaderThemeOption.SEPIA to "Sepya",\n                                    ReaderThemeOption.DARK to "Koyu",\n                                    ReaderThemeOption.AMOLED to "AMOLED"\n                                ).forEach { (option, label) ->\n                                    Button(\n                                        onClick = {\n                                            selectedTheme = option\n                                            LibraryStore.saveReaderTheme(context, option)\n                                        }\n                                    ) {\n                                        Text(\n                                            if (selectedTheme == option) "✓ $label" else label\n                                        )\n                                    }\n                                }'''
+          if old not in s:
+              raise SystemExit('Theme selector pattern not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          # PDF: pure-black outer background and true inverse-luminance paper.
+          p = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''            ReaderThemeOption.DARK -> floatArrayOf(\n                // Tam negatif yerine kömür kağıt + kırık beyaz yazı.\n                // Böylece beyaz patlamalar ve tarama lekeleri daha az rahatsız eder.\n                -0.2286f, -0.4489f, -0.0872f, 0f, 222f,\n                -0.2240f, -0.4397f, -0.0854f, 0f, 218f,\n                -0.2122f, -0.4167f, -0.0809f, 0f, 208f,\n                0f, 0f, 0f, 1f, 0f\n            )\n        }'''
+          new = '''            ReaderThemeOption.DARK -> floatArrayOf(\n                // Tam negatif yerine kömür kağıt + kırık beyaz yazı.\n                // Böylece beyaz patlamalar ve tarama lekeleri daha az rahatsız eder.\n                -0.2286f, -0.4489f, -0.0872f, 0f, 222f,\n                -0.2240f, -0.4397f, -0.0854f, 0f, 218f,\n                -0.2122f, -0.4167f, -0.0809f, 0f, 208f,\n                0f, 0f, 0f, 1f, 0f\n            )\n\n            ReaderThemeOption.AMOLED -> floatArrayOf(\n                // Beyaz kağıdı gerçek siyaha, siyah yazıyı beyaza çevir.\n                -0.2126f, -0.7152f, -0.0722f, 0f, 255f,\n                -0.2126f, -0.7152f, -0.0722f, 0f, 255f,\n                -0.2126f, -0.7152f, -0.0722f, 0f, 255f,\n                0f, 0f, 0f, 1f, 0f\n            )\n        }'''
+          if old not in s:
+              raise SystemExit('PDF theme matrix pattern not found')
+          s = s.replace(old, new, 1)
+
+          old = '''        ReaderThemeOption.LIGHT -> Color(0xFFE8DFD0)\n        ReaderThemeOption.SEPIA -> Color(0xFFC9B38E)\n        ReaderThemeOption.DARK -> Color(0xFF111111)\n    }'''
+          new = '''        ReaderThemeOption.LIGHT -> Color(0xFFE8DFD0)\n        ReaderThemeOption.SEPIA -> Color(0xFFC9B38E)\n        ReaderThemeOption.DARK -> Color(0xFF111111)\n        ReaderThemeOption.AMOLED -> Color.Black\n    }'''
+          if old not in s:
+              raise SystemExit('PDF background pattern not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit AMOLED theme
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/LibraryStore.kt app/src/main/java/com/foldbook/app/MainActivity.kt app/src/main/java/com/foldbook/app/PdfReader.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Add AMOLED reader theme"
+          git push origin development
