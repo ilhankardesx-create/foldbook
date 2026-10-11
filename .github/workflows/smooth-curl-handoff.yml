@@ -12,139 +12,16 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           ref: development
-
-      - name: Smooth page settle and make curl angle follow finger
+      - name: Apply curl patch
+        env:
+          PATCH_B64: "ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCByZQoKbWFpbiA9IFBhdGgoImFwcC9zcmMvbWFpbi9qYXZhL2NvbS9mb2xkYm9vay9hcHAvTWFpbkFjdGl2aXR5Lmt0IikKcyA9IG1haW4ucmVhZF90ZXh0KCkKaWYgImltcG9ydCBhbmRyb2lkeC5jb21wb3NlLnJ1bnRpbWUud2l0aEZyYW1lTmFub3MiIG5vdCBpbiBzOgogICAgcyA9IHMucmVwbGFjZSgKICAgICAgICAiaW1wb3J0IGFuZHJvaWR4LmNvbXBvc2UucnVudGltZS5zdGF0aWNDb21wb3NpdGlvbkxvY2FsT2ZcbiIsCiAgICAgICAgImltcG9ydCBhbmRyb2lkeC5jb21wb3NlLnJ1bnRpbWUuc3RhdGljQ29tcG9zaXRpb25Mb2NhbE9mXG5pbXBvcnQgYW5kcm9pZHguY29tcG9zZS5ydW50aW1lLndpdGhGcmFtZU5hbm9zXG4iLAogICAgICAgIDEsCiAgICApCmVwdWJfcGF0dGVybiA9IHJlLmNvbXBpbGUoCiAgICByJyg/UDxpbmRlbnQ+WyBcdF0qKVNuYXBzaG90XC53aXRoTXV0YWJsZVNuYXBzaG90IFx7XG4nCiAgICByJyg/UD1pbmRlbnQpICAgIHBhZ2VJbmRleCA9IG5ld0luZGV4XG4nCiAgICByJyg/UD1pbmRlbnQpICAgIGRyYWdQeCA9IDBmXG4nCiAgICByJyg/UD1pbmRlbnQpICAgIGRyYWdQcm9ncmVzcyA9IDBmXG4nCiAgICByJyg/UD1pbmRlbnQpICAgIGRyYWdZRnJhY3Rpb24gPSAwXC41ZlxuJwogICAgcicoP1A9aW5kZW50KSAgICB0dXJuRGlyZWN0aW9uID0gMFxuJwogICAgcicoP1A9aW5kZW50KSAgICBzZXR0bGluZyA9IGZhbHNlXG4nCiAgICByJyg/UD1pbmRlbnQpXH1cbicKICAgIHInKD9QPWluZGVudClvblBhZ2VDaGFuZ2VkXChuZXdJbmRleFwpJwopCmRlZiBlcHViX3JlcGwobSk6CiAgICBpPW0uZ3JvdXAoImluZGVudCIpCiAgICByZXR1cm4gKAogICAgICAgIGYie2l9U25hcHNob3Qud2l0aE11dGFibGVTbmFwc2hvdCB7e1xuIgogICAgICAgIGYie2l9ICAgIHBhZ2VJbmRleCA9IG5ld0luZGV4XG4iCiAgICAgICAgZiJ7aX19fVxuIgogICAgICAgIGYie2l9b25QYWdlQ2hhbmdlZChuZXdJbmRleClcbiIKICAgICAgICBmIntpfXdpdGhGcmFtZU5hbm9zIHt7IH19XG4iCiAgICAgICAgZiJ7aX1TbmFwc2hvdC53aXRoTXV0YWJsZVNuYXBzaG90IHt7XG4iCiAgICAgICAgZiJ7aX0gICAgZHJhZ1B4ID0gMGZcbiIKICAgICAgICBmIntpfSAgICBkcmFnUHJvZ3Jlc3MgPSAwZlxuIgogICAgICAgIGYie2l9ICAgIGRyYWdZRnJhY3Rpb24gPSAwLjVmXG4iCiAgICAgICAgZiJ7aX0gICAgdHVybkRpcmVjdGlvbiA9IDBcbiIKICAgICAgICBmIntpfSAgICBzZXR0bGluZyA9IGZhbHNlXG4iCiAgICAgICAgZiJ7aX19fSIKICAgICkKcywgbjEgPSBlcHViX3BhdHRlcm4uc3VibihlcHViX3JlcGwsIHMpCmlmIG4xIDwgMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoIkVQVUIgaGFuZG9mZiBibG9jayBub3QgZm91bmQiKQptYWluLndyaXRlX3RleHQocykKCnBkZiA9IFBhdGgoImFwcC9zcmMvbWFpbi9qYXZhL2NvbS9mb2xkYm9vay9hcHAvUGRmUmVhZGVyLmt0IikKcyA9IHBkZi5yZWFkX3RleHQoKQppZiAiaW1wb3J0IGFuZHJvaWR4LmNvbXBvc2UucnVudGltZS53aXRoRnJhbWVOYW5vcyIgbm90IGluIHM6CiAgICBzID0gcy5yZXBsYWNlKAogICAgICAgICJpbXBvcnQgYW5kcm9pZHguY29tcG9zZS5ydW50aW1lLnNldFZhbHVlXG4iLAogICAgICAgICJpbXBvcnQgYW5kcm9pZHguY29tcG9zZS5ydW50aW1lLnNldFZhbHVlXG5pbXBvcnQgYW5kcm9pZHguY29tcG9zZS5ydW50aW1lLndpdGhGcmFtZU5hbm9zXG4iLAogICAgICAgIDEsCiAgICApCnBkZl9wYXR0ZXJuID0gcmUuY29tcGlsZSgKICAgIHInKD9QPGluZGVudD5bIFx0XSopU25hcHNob3RcLndpdGhNdXRhYmxlU25hcHNob3QgXHtcbicKICAgIHInKD9QPWluZGVudCkgICAgcGFnZUluZGV4ID0gbmV3SW5kZXhcbicKICAgIHInKD9QPWluZGVudCkgICAgZHJhZ1B4ID0gMGZcbicKICAgIHInKD9QPWluZGVudCkgICAgZHJhZ1Byb2dyZXNzID0gMGZcbicKICAgIHInKD9QPWluZGVudCkgICAgdHVybkRpcmVjdGlvbiA9IDBcbicKICAgIHInKD9QPWluZGVudCkgICAgc2V0dGxpbmcgPSBmYWxzZVxuJwogICAgcicoP1A9aW5kZW50KVx9XG4nCiAgICByJyg/UD1pbmRlbnQpb25QYWdlQ2hhbmdlZFwobmV3SW5kZXhcKScKKQpkZWYgcGRmX3JlcGwobSk6CiAgICBpPW0uZ3JvdXAoImluZGVudCIpCiAgICByZXR1cm4gKAogICAgICAgIGYie2l9U25hcHNob3Qud2l0aE11dGFibGVTbmFwc2hvdCB7e1xuIgogICAgICAgIGYie2l9ICAgIHBhZ2VJbmRleCA9IG5ld0luZGV4XG4iCiAgICAgICAgZiJ7aX19fVxuIgogICAgICAgIGYie2l9b25QYWdlQ2hhbmdlZChuZXdJbmRleClcbiIKICAgICAgICBmIntpfXdpdGhGcmFtZU5hbm9zIHt7IH19XG4iCiAgICAgICAgZiJ7aX1TbmFwc2hvdC53aXRoTXV0YWJsZVNuYXBzaG90IHt7XG4iCiAgICAgICAgZiJ7aX0gICAgZHJhZ1B4ID0gMGZcbiIKICAgICAgICBmIntpfSAgICBkcmFnUHJvZ3Jlc3MgPSAwZlxuIgogICAgICAgIGYie2l9ICAgIHR1cm5EaXJlY3Rpb24gPSAwXG4iCiAgICAgICAgZiJ7aX0gICAgc2V0dGxpbmcgPSBmYWxzZVxuIgogICAgICAgIGYie2l9fX0iCiAgICApCnMsIG4yID0gcGRmX3BhdHRlcm4uc3VibihwZGZfcmVwbCwgcykKaWYgbjIgPCAxOgogICAgcmFpc2UgU3lzdGVtRXhpdCgiUERGIGhhbmRvZmYgYmxvY2sgbm90IGZvdW5kIikKcGRmLndyaXRlX3RleHQocykKCmN1cmwgPSBQYXRoKCJhcHAvc3JjL21haW4vamF2YS9jb20vZm9sZGJvb2svYXBwL1BhZ2VDdXJsLmt0IikKcyA9IGN1cmwucmVhZF90ZXh0KCkKb2xkID0gIiIiICAgICAgICAgICAgICAgIHZhbCByb3dTa2V3ID0KICAgICAgICAgICAgICAgICAgICAodiAtIHRvdWNoWSkgKiAwLjExZiAqIHdhdmUgKgogICAgICAgICAgICAgICAgICAgICAgICBpZiAoZm9yd2FyZCkgMWYgZWxzZSAtMWYKIiIiCm5ldyA9ICIiIiAgICAgICAgICAgICAgICAvLyBWZXJ0aWNhbCBmaW5nZXIgbW92ZW1lbnQgY2hhbmdlcyB0aGUgY3VybCBhbmdsZSBpbiByZWFsIHRpbWUuCiAgICAgICAgICAgICAgICB2YWwgdGlsdCA9ICh0b3VjaFkgLSAwLjVmKSAqIDAuNThmICogd2F2ZQogICAgICAgICAgICAgICAgdmFsIHJvd1NrZXcgPQogICAgICAgICAgICAgICAgICAgICh2IC0gMC41ZikgKiB0aWx0ICoKICAgICAgICAgICAgICAgICAgICAgICAgaWYgKGZvcndhcmQpIDFmIGVsc2UgLTFmCiIiIgppZiBvbGQgbm90IGluIHM6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJQYWdlQ3VybCByb3dTa2V3IGJsb2NrIG5vdCBmb3VuZCIpCnMgPSBzLnJlcGxhY2Uob2xkLCBuZXcsIDEpCm9sZDIgPSAiKHRvdWNoWSAtIDAuNWYpICogaGVpZ2h0ICogMC4wMzBmICoiCmlmIG9sZDIgbm90IGluIHM6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJQYWdlQ3VybCBib3cgYmxvY2sgbm90IGZvdW5kIikKcyA9IHMucmVwbGFjZShvbGQyLCAiKHRvdWNoWSAtIDAuNWYpICogaGVpZ2h0ICogMC4wNTBmICoiLCAxKQpjdXJsLndyaXRlX3RleHQocykKCnByaW50KCJwYXRjaGVkIiwgbjEsIG4yKQo="
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          # EPUB reader: keep the final curl frame for one display frame while the
-          # destination page recomposes underneath it, then remove the overlay.
-          main = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
-          s = main.read_text()
-          if 'import androidx.compose.runtime.withFrameNanos' not in s:
-              s = s.replace(
-                  'import androidx.compose.runtime.staticCompositionLocalOf\n',
-                  'import androidx.compose.runtime.staticCompositionLocalOf\nimport androidx.compose.runtime.withFrameNanos\n',
-                  1,
-              )
-
-          epub_pattern = re.compile(
-              r'''(?P<indent>\s*)Snapshot\.withMutableSnapshot \{\n'''
-              r'''(?P=indent)    pageIndex = newIndex\n'''
-              r'''(?P=indent)    dragPx = 0f\n'''
-              r'''(?P=indent)    dragProgress = 0f\n'''
-              r'''(?P=indent)    dragYFraction = 0\.5f\n'''
-              r'''(?P=indent)    turnDirection = 0\n'''
-              r'''(?P=indent)    settling = false\n'''
-              r'''(?P=indent)\}\n'''
-              r'''(?P=indent)onPageChanged\(newIndex\)'''
-          )
-
-          def epub_repl(m):
-              i = m.group('indent')
-              return (
-                  f'{i}Snapshot.withMutableSnapshot {{\n'
-                  f'{i}    pageIndex = newIndex\n'
-                  f'{i}}}\n'
-                  f'{i}onPageChanged(newIndex)\n'
-                  f'{i}// Keep the frozen final curl above the newly composed page for one frame.\n'
-                  f'{i}withFrameNanos {{ }}\n'
-                  f'{i}Snapshot.withMutableSnapshot {{\n'
-                  f'{i}    dragPx = 0f\n'
-                  f'{i}    dragProgress = 0f\n'
-                  f'{i}    dragYFraction = 0.5f\n'
-                  f'{i}    turnDirection = 0\n'
-                  f'{i}    settling = false\n'
-                  f'{i}}}'
-              )
-
-          s, epub_count = epub_pattern.subn(epub_repl, s)
-          if epub_count < 1:
-              raise SystemExit('EPUB settle handoff block not found')
-          main.write_text(s)
-
-          # PDF reader: same frame-synchronised handoff. PDF rendering is heavier,
-          # so this removes the especially visible post-turn refresh/flicker.
-          pdf = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
-          s = pdf.read_text()
-          if 'import androidx.compose.runtime.withFrameNanos' not in s:
-              s = s.replace(
-                  'import androidx.compose.runtime.setValue\n',
-                  'import androidx.compose.runtime.setValue\nimport androidx.compose.runtime.withFrameNanos\n',
-                  1,
-              )
-
-          pdf_pattern = re.compile(
-              r'''(?P<indent>\s*)Snapshot\.withMutableSnapshot \{\n'''
-              r'''(?P=indent)    pageIndex = newIndex\n'''
-              r'''(?P=indent)    dragPx = 0f\n'''
-              r'''(?P=indent)    dragProgress = 0f\n'''
-              r'''(?P=indent)    turnDirection = 0\n'''
-              r'''(?P=indent)    settling = false\n'''
-              r'''(?P=indent)\}\n'''
-              r'''(?P=indent)onPageChanged\(newIndex\)'''
-          )
-
-          def pdf_repl(m):
-              i = m.group('indent')
-              return (
-                  f'{i}Snapshot.withMutableSnapshot {{\n'
-                  f'{i}    pageIndex = newIndex\n'
-                  f'{i}}}\n'
-                  f'{i}onPageChanged(newIndex)\n'
-                  f'{i}// Let the destination bitmap/page settle behind the frozen curl.\n'
-                  f'{i}withFrameNanos {{ }}\n'
-                  f'{i}Snapshot.withMutableSnapshot {{\n'
-                  f'{i}    dragPx = 0f\n'
-                  f'{i}    dragProgress = 0f\n'
-                  f'{i}    turnDirection = 0\n'
-                  f'{i}    settling = false\n'
-                  f'{i}}}'
-              )
-
-          s, pdf_count = pdf_pattern.subn(pdf_repl, s)
-          if pdf_count < 1:
-              raise SystemExit('PDF settle handoff block not found')
-          pdf.write_text(s)
-
-          # Curl geometry: horizontal finger movement controls progress as before;
-          # vertical movement now directly changes the fold-line angle.
-          curl = Path('app/src/main/java/com/foldbook/app/PageCurl.kt')
-          s = curl.read_text()
-          old = '''                val rowSkew =
-                    (v - touchY) * 0.11f * wave *
-                        if (forward) 1f else -1f
-'''
-          new = '''                // Vertical finger movement now changes the fold-line angle,
-                // not just its pivot. High/low drags visibly tilt the travelling curl.
-                val tilt = (touchY - 0.5f) * 0.58f * wave
-                val rowSkew =
-                    (v - 0.5f) * tilt *
-                        if (forward) 1f else -1f
-'''
-          if old not in s:
-              raise SystemExit('PageCurl rowSkew block not found')
-          s = s.replace(old, new, 1)
-          s = s.replace(
-              '(touchY - 0.5f) * height * 0.030f *',
-              '(touchY - 0.5f) * height * 0.050f *',
-              1,
-          )
-          curl.write_text(s)
-
-          print(f'EPUB handoff blocks patched: {epub_count}')
-          print(f'PDF handoff blocks patched: {pdf_count}')
-          PY
-
+          echo "$PATCH_B64" | base64 --decode | python3
           git config user.name "FoldBook Dev Bot"
           git config user.email "actions@github.com"
-          git add app/src/main/java/com/foldbook/app/MainActivity.kt \
-                  app/src/main/java/com/foldbook/app/PdfReader.kt \
-                  app/src/main/java/com/foldbook/app/PageCurl.kt
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt app/src/main/java/com/foldbook/app/PdfReader.kt app/src/main/java/com/foldbook/app/PageCurl.kt
           git commit -m "Smooth page curl handoff and finger angle"
           git push origin HEAD:development
