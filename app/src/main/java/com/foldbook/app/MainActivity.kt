@@ -2608,12 +2608,17 @@ private fun BookPage(
                     .fillMaxWidth()
             ) {
                 if (isBackSide) {
-                    Text(
-                        text = highlightedBody,
-                        fontSize = bodySize.sp,
-                        lineHeight = (bodySize + 11f).sp,
-                        fontFamily = FontFamily.Serif,
-                        color = palette.text.copy(alpha = 0.88f)
+                    BasicTextField(
+                        value = TextFieldValue(annotatedString = highlightedBody),
+                        onValueChange = {},
+                        modifier = Modifier.fillMaxSize(),
+                        readOnly = true,
+                        textStyle = TextStyle(
+                            fontSize = bodySize.sp,
+                            lineHeight = (bodySize + 11f).sp,
+                            fontFamily = FontFamily.Serif,
+                            color = palette.text
+                        )
                     )
                 } else {
                     BasicTextField(
