@@ -1,0 +1,30 @@
+name: Fix Cancel Flash Axis
+
+on:
+  push:
+    branches: [ "development" ]
+    paths: [ ".github/workflows/fix-cancel-flash-axis.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+
+      - name: Apply page turn cancel fixes
+        run: python3 scripts/fix_cancel_flash_axis.py
+
+      - name: Commit patch
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt \
+                  app/src/main/java/com/foldbook/app/PdfReader.kt \
+                  app/src/main/java/com/foldbook/app/PageCurl.kt
+          git commit -m "Fix vertical gesture false turns and cancel flash"
+          git push origin HEAD:development
