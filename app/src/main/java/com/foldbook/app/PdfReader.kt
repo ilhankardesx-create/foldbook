@@ -1648,11 +1648,13 @@ private fun PdfFrozenHighlightOverlay(
                 ReaderThemeOption.LIGHT -> Color(0xFFDFFF3F).copy(alpha = 0.60f)
                 ReaderThemeOption.SEPIA -> Color(0xFFD8F23B).copy(alpha = 0.54f)
                 ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)
+                ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)
             }
             val markerSheen = when (theme) {
                 ReaderThemeOption.LIGHT -> Color(0xFFE9FF64).copy(alpha = 0.24f)
                 ReaderThemeOption.SEPIA -> Color(0xFFE6F75C).copy(alpha = 0.20f)
                 ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)
+                ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)
             }
             val markerBleed = 1.8.dp.toPx()
             val markerRadius = 2.8.dp.toPx()
@@ -1716,6 +1718,7 @@ private fun PdfFrozenPage(
             ReaderThemeOption.LIGHT -> Color(0xFFF5F2EA)
             ReaderThemeOption.SEPIA -> Color(0xFFE7D3B2)
             ReaderThemeOption.DARK -> Color(0xFF191919)
+            ReaderThemeOption.AMOLED -> Color.Black
         }
     ) {
         Box(
@@ -2072,6 +2075,7 @@ private fun PdfPageSurface(
             ReaderThemeOption.LIGHT -> Color(0xFFF5F2EA)
             ReaderThemeOption.SEPIA -> Color(0xFFE7D3B2)
             ReaderThemeOption.DARK -> Color(0xFF191919)
+            ReaderThemeOption.AMOLED -> Color.Black
         }
     ) {
         Box(
@@ -2093,11 +2097,13 @@ private fun PdfPageSurface(
                     ReaderThemeOption.LIGHT -> Color(0xFFDFFF3F).copy(alpha = 0.60f)
                     ReaderThemeOption.SEPIA -> Color(0xFFD8F23B).copy(alpha = 0.54f)
                     ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)
+                ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)
                 }
                 val markerSheen = when (theme) {
                     ReaderThemeOption.LIGHT -> Color(0xFFE9FF64).copy(alpha = 0.24f)
                     ReaderThemeOption.SEPIA -> Color(0xFFE6F75C).copy(alpha = 0.20f)
                     ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)
+                ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)
                 }
                 val markerBleed = 1.8.dp.toPx()
                 val markerRadius = 2.8.dp.toPx()
