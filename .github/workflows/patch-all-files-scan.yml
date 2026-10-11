@@ -1,0 +1,350 @@
+name: Patch All Files Scan
+
+on:
+  push:
+    branches:
+      - development
+    paths:
+      - .github/workflows/patch-all-files-scan.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Patch full device book scan
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # AndroidManifest: request one-time All files access capability.
+          manifest_path = Path('app/src/main/AndroidManifest.xml')
+          manifest = manifest_path.read_text(encoding='utf-8')
+          manifest = manifest.replace(
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools">',
+              1
+          )
+          permission_block = '''\n    <uses-permission\n        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"\n        tools:ignore="ScopedStorage" />\n'''
+          if 'android.permission.MANAGE_EXTERNAL_STORAGE' not in manifest:
+              anchor = '    <application\n'
+              if anchor not in manifest:
+                  raise SystemExit('Manifest application anchor not found')
+              manifest = manifest.replace(anchor, permission_block + '\n' + anchor, 1)
+          manifest_path.write_text(manifest, encoding='utf-8')
+
+          # Shared IO helper: content:// and file:// books are both readable.
+          io_path = Path('app/src/main/java/com/foldbook/app/BookUriIO.kt')
+          io_path.write_text(r'''package com.foldbook.app
+
+import android.content.Context
+import android.net.Uri
+import android.os.ParcelFileDescriptor
+import java.io.File
+import java.io.FileInputStream
+import java.io.InputStream
+
+internal fun Context.openBookInputStream(uri: Uri): InputStream? {
+    return if (uri.scheme.equals("file", ignoreCase = true)) {
+        uri.path?.let { path ->
+            runCatching { FileInputStream(File(path)) }.getOrNull()
+        }
+    } else {
+        contentResolver.openInputStream(uri)
+    }
+}
+
+internal fun Context.openBookFileDescriptor(
+    uri: Uri,
+    mode: String = "r"
+): ParcelFileDescriptor? {
+    return if (uri.scheme.equals("file", ignoreCase = true)) {
+        val path = uri.path ?: return null
+        val file = File(path)
+        val descriptorMode = if (mode.contains('w')) {
+            ParcelFileDescriptor.MODE_READ_WRITE
+        } else {
+            ParcelFileDescriptor.MODE_READ_ONLY
+        }
+        runCatching {
+            ParcelFileDescriptor.open(file, descriptorMode)
+        }.getOrNull()
+    } else {
+        contentResolver.openFileDescriptor(uri, mode)
+    }
+}
+''', encoding='utf-8')
+
+          # EPUB loader must support file:// books returned by the full scanner.
+          epub_path = Path('app/src/main/java/com/foldbook/app/EpubLoader.kt')
+          epub = epub_path.read_text(encoding='utf-8')
+          old_count = epub.count('context.contentResolver.openInputStream(uri)')
+          if old_count < 1:
+              raise SystemExit('EPUB input stream anchor not found')
+          epub = epub.replace(
+              'context.contentResolver.openInputStream(uri)',
+              'context.openBookInputStream(uri)'
+          )
+          epub_path.write_text(epub, encoding='utf-8')
+
+          # PDF renderer must support file:// books too.
+          pdf_path = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          pdf = pdf_path.read_text(encoding='utf-8')
+          old_count = pdf.count('context.contentResolver.openFileDescriptor(uri, "r")')
+          if old_count < 1:
+              raise SystemExit('PDF descriptor anchor not found')
+          pdf = pdf.replace(
+              'context.contentResolver.openFileDescriptor(uri, "r")',
+              'context.openBookFileDescriptor(uri, "r")'
+          )
+          pdf_path.write_text(pdf, encoding='utf-8')
+
+          # Replace MediaStore-only scanner with direct storage traversal on Android 11+.
+          scanner_path = Path('app/src/main/java/com/foldbook/app/DeviceBookScanner.kt')
+          scanner_path.write_text(r'''package com.foldbook.app
+
+import android.content.ContentUris
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import java.io.File
+import java.util.ArrayDeque
+
+/**
+ * Discovers PDF/EPUB books from shared storage.
+ *
+ * Android 11+ uses MANAGE_EXTERNAL_STORAGE after the user explicitly grants it once,
+ * so FoldBook can walk normal shared-storage folders directly. Android 10 and below
+ * keep the previous MediaStore best-effort fallback.
+ */
+object DeviceBookScanner {
+
+    private data class Candidate(
+        val book: LibraryBook,
+        val identity: String
+    )
+
+    fun scan(context: Context): List<LibraryBook> {
+        val books = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                error("Cihazdaki bütün kitapları taramak için dosya erişim izni gerekli.")
+            }
+            scanFileSystem(context)
+        } else {
+            scanMediaStore(context)
+        }
+
+        return books
+            .distinctBy { it.identity }
+            .map { it.book }
+            .sortedWith(
+                compareByDescending<LibraryBook> { it.modifiedAt }
+                    .thenBy { it.title.lowercase() }
+            )
+    }
+
+    private fun scanFileSystem(context: Context): List<Candidate> {
+        val roots = linkedSetOf<File>()
+        roots += Environment.getExternalStorageDirectory()
+
+        // Add removable/shared volumes that Android exposes to this app.
+        context.getExternalFilesDirs(null).forEach { appDir ->
+            var root: File? = appDir
+            repeat(4) { root = root?.parentFile }
+            if (root != null && root!!.exists() && root!!.canRead()) {
+                roots += root!!
+            }
+        }
+
+        val result = mutableListOf<Candidate>()
+        val visitedDirectories = hashSetOf<String>()
+        val stack = ArrayDeque<File>()
+        roots.filter { it.exists() && it.canRead() }.forEach { stack.add(it) }
+
+        while (stack.isNotEmpty()) {
+            val entry = stack.removeLast()
+
+            if (entry.isDirectory) {
+                val canonical = runCatching { entry.canonicalPath }.getOrNull()
+                    ?: entry.absolutePath
+                if (!visitedDirectories.add(canonical)) continue
+                if (shouldSkipDirectory(canonical)) continue
+
+                val children = runCatching { entry.listFiles() }.getOrNull() ?: continue
+                children.forEach { child -> stack.add(child) }
+                continue
+            }
+
+            if (!entry.isFile || !entry.canRead()) continue
+            val format = detectFormat(entry.name) ?: continue
+            val canonicalPath = runCatching { entry.canonicalPath }.getOrNull()
+                ?: entry.absolutePath
+            val title = entry.name
+                .substringBeforeLast('.', entry.name)
+                .replace('_', ' ')
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .ifBlank { "İsimsiz Kitap" }
+
+            result += Candidate(
+                book = LibraryBook(
+                    title = title,
+                    uri = Uri.fromFile(entry).toString(),
+                    format = format,
+                    modifiedAt = entry.lastModified(),
+                    isFavorite = LibraryStore.isFavorite(context, Uri.fromFile(entry).toString())
+                ),
+                identity = canonicalPath
+            )
+        }
+
+        return result
+    }
+
+    private fun shouldSkipDirectory(path: String): Boolean {
+        val normalized = path.replace('\\', '/').lowercase()
+        return normalized.contains("/android/data/") ||
+            normalized.endsWith("/android/data") ||
+            normalized.contains("/android/obb/") ||
+            normalized.endsWith("/android/obb")
+    }
+
+    private fun detectFormat(name: String): BookFormat? {
+        return when {
+            name.endsWith(".pdf", ignoreCase = true) -> BookFormat.PDF
+            name.endsWith(".epub", ignoreCase = true) -> BookFormat.EPUB
+            else -> null
+        }
+    }
+
+    private fun scanMediaStore(context: Context): List<Candidate> {
+        val output = mutableListOf<Candidate>()
+        val collections = linkedSetOf<Uri>()
+        collections += MediaStore.Files.getContentUri("external")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            collections += MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        }
+
+        collections.forEach { collection ->
+            queryCollection(context, collection, output)
+        }
+        return output
+    }
+
+    private fun queryCollection(
+        context: Context,
+        collection: Uri,
+        output: MutableList<Candidate>
+    ) {
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            MediaStore.MediaColumns.SIZE
+        )
+        val selection = "(${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? OR ${MediaStore.MediaColumns.MIME_TYPE} = ? OR ${MediaStore.MediaColumns.MIME_TYPE} = ?)"
+        val args = arrayOf("%.pdf", "%.epub", "application/pdf", "application/epub+zip")
+
+        runCatching {
+            context.contentResolver.query(
+                collection,
+                projection,
+                selection,
+                args,
+                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                val mimeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE)
+                val modifiedIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                val sizeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+
+                while (cursor.moveToNext()) {
+                    if (idIndex < 0) continue
+                    val id = cursor.getLong(idIndex)
+                    val name = if (nameIndex >= 0) cursor.getString(nameIndex).orEmpty() else ""
+                    val mime = if (mimeIndex >= 0) cursor.getString(mimeIndex).orEmpty() else ""
+                    val modified = if (modifiedIndex >= 0) cursor.getLong(modifiedIndex) * 1000L else 0L
+                    val size = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
+                    val format = when {
+                        mime.equals("application/pdf", true) || name.endsWith(".pdf", true) -> BookFormat.PDF
+                        mime.equals("application/epub+zip", true) || name.endsWith(".epub", true) -> BookFormat.EPUB
+                        else -> null
+                    } ?: continue
+                    val uri = ContentUris.withAppendedId(collection, id)
+                    val title = name.substringBeforeLast('.', name)
+                        .replace('_', ' ')
+                        .replace(Regex("\\s+"), " ")
+                        .trim()
+                        .ifBlank { "İsimsiz Kitap" }
+
+                    output += Candidate(
+                        LibraryBook(
+                            title = title,
+                            uri = uri.toString(),
+                            format = format,
+                            modifiedAt = modified,
+                            isFavorite = LibraryStore.isFavorite(context, uri.toString())
+                        ),
+                        "${name.lowercase()}|$size|$modified"
+                    )
+                }
+            }
+        }
+    }
+}
+''', encoding='utf-8')
+
+          # Main UI: first tap requests All files access; returning with permission starts scan.
+          main_path = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          main = main_path.read_text(encoding='utf-8')
+          if 'import android.os.Build\n' not in main:
+              main = main.replace(
+                  'import android.os.Bundle\n',
+                  'import android.os.Build\nimport android.os.Bundle\nimport android.os.Environment\nimport android.provider.Settings\n',
+                  1
+              )
+
+          marker = '''    LaunchedEffect(Unit) {\n        LibraryStore.savedFolder(context)?.let { scanFolder(it) }\n'''
+          permission_code = '''    val allFilesAccessLauncher = rememberLauncherForActivityResult(\n        contract = ActivityResultContracts.StartActivityForResult()\n    ) {\n        if (\n            Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||\n            Environment.isExternalStorageManager()\n        ) {\n            scanDeviceBooks()\n        } else {\n            Toast.makeText(\n                context,\n                "Dosya erişim izni verilmedi.",\n                Toast.LENGTH_SHORT\n            ).show()\n        }\n    }\n\n    fun scanDeviceBooksWithPermission() {\n        if (\n            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&\n            !Environment.isExternalStorageManager()\n        ) {\n            val appSettings = Intent(\n                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,\n                Uri.parse("package:${context.packageName}")\n            )\n            try {\n                allFilesAccessLauncher.launch(appSettings)\n            } catch (_: Exception) {\n                allFilesAccessLauncher.launch(\n                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)\n                )\n            }\n        } else {\n            scanDeviceBooks()\n        }\n    }\n\n'''
+          if 'fun scanDeviceBooksWithPermission()' not in main:
+              if marker not in main:
+                  raise SystemExit('MainActivity permission insertion anchor not found')
+              main = main.replace(marker, permission_code + marker, 1)
+
+          if 'onScanDevice = ::scanDeviceBooks,' in main:
+              main = main.replace(
+                  'onScanDevice = ::scanDeviceBooks,',
+                  'onScanDevice = ::scanDeviceBooksWithPermission,',
+                  1
+              )
+          elif 'onScanDevice = ::scanDeviceBooksWithPermission,' not in main:
+              raise SystemExit('MainActivity onScanDevice anchor not found')
+
+          main_path.write_text(main, encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/AndroidManifest.xml \
+                  app/src/main/java/com/foldbook/app/BookUriIO.kt \
+                  app/src/main/java/com/foldbook/app/DeviceBookScanner.kt \
+                  app/src/main/java/com/foldbook/app/EpubLoader.kt \
+                  app/src/main/java/com/foldbook/app/PdfReader.kt \
+                  app/src/main/java/com/foldbook/app/MainActivity.kt
+          git commit -m "Add one-time full storage book scan"
+          git push origin HEAD:development
