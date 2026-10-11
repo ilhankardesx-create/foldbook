@@ -26,14 +26,12 @@ internal fun singlePageDeviceShape(
     val view = LocalView.current
     val density = LocalDensity.current
     val windowInsets = view.rootWindowInsets ?: return fallback
-    val pageInset = minOf(horizontalInset, verticalInset)
+    val pageInset = maxOf(horizontalInset, verticalInset)
 
     fun radius(position: Int): Dp {
-        val radiusPx = windowInsets.getRoundedCorner(position)?.radius ?: 0
-        if (radiusPx <= 0) return fallbackRadius
-
+        val radiusPx = windowInsets.getRoundedCorner(position)?.radius ?: return 0.dp
         val detected = with(density) { radiusPx.toDp() } - pageInset
-        return if (detected > fallbackRadius) detected else fallbackRadius
+        return detected.coerceAtLeast(0.dp)
     }
 
     return AbsoluteRoundedCornerShape(
