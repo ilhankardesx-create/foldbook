@@ -1,0 +1,31 @@
+name: Add Single Book Picker
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/add-single-book-picker.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Add single-book picker
+        run: python3 scripts/add_single_book_picker.py
+
+      - name: Commit picker support
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/LibraryStore.kt app/src/main/java/com/foldbook/app/MainActivity.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Add persistent single-book picker"
+          git push origin development
