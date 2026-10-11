@@ -1,0 +1,64 @@
+name: Fix Settle Flicker And Page Tone
+
+on:
+  push:
+    branches: [ "development" ]
+    paths: [ ".github/workflows/fix-settle-tone.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 20
+
+      - name: Remove handoff flicker and equalize paper tone
+        run: |
+          # Restore only the reader state-transition files to the version immediately
+          # before the one-frame handoff experiment. Keep the new finger-angle PageCurl.
+          git checkout aad82891b794ebd0710a2e56644dda73c04566f8^ -- \
+            app/src/main/java/com/foldbook/app/MainActivity.kt \
+            app/src/main/java/com/foldbook/app/PdfReader.kt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main = Path('app/src/main/java/com/foldbook/app/MainActivity.kt')
+          s = main.read_text()
+          # The back of the virtual paper should use the same base tone as the front.
+          # Curl lighting itself provides the depth cue.
+          s = s.replace('pageBack = Color(0xFFFFF7E8)', 'pageBack = Color(0xFFFFFCF5)')
+          s = s.replace('pageBack = Color(0xFFEAD4B1)', 'pageBack = Color(0xFFF2DFC0)')
+          s = s.replace('pageBack = Color(0xFF1D1D1D)', 'pageBack = Color(0xFF232323)')
+          main.write_text(s)
+
+          curl = Path('app/src/main/java/com/foldbook/app/PageCurl.kt')
+          s = curl.read_text()
+          old = '''                    val shade =
+                        (0.04f * normalizedLift + 0.13f * edgeOn * wave)
+                            .coerceIn(0f, 0.18f)
+'''
+          new = '''                    // Keep flat paper at the exact same tone as the page below.
+                    // Darkness belongs only to the actual curved/edge-on part of the sheet.
+                    val shade =
+                        (0.15f * edgeOn * wave)
+                            .coerceIn(0f, 0.17f)
+'''
+          if old not in s:
+              raise SystemExit('PageCurl shade block not found')
+          s = s.replace(old, new, 1)
+          curl.write_text(s)
+          PY
+
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt \
+                  app/src/main/java/com/foldbook/app/PdfReader.kt \
+                  app/src/main/java/com/foldbook/app/PageCurl.kt
+          git commit -m "Fix post-turn flicker and unify paper tone"
+          git push origin HEAD:development
