@@ -2456,11 +2456,11 @@ private fun TurningPage(
 @Composable
 private fun BookSpine(progress: Float) {
     val shadowStrength =
-        0.07f + (0.10f * (1f - abs(0.5f - progress) * 2f))
+        0.018f + (0.030f * (1f - abs(0.5f - progress) * 2f))
 
     Box(
         modifier = Modifier
-            .width(10.dp)
+            .width(4.dp)
             .fillMaxHeight()
             .padding(vertical = 4.dp)
             .background(
