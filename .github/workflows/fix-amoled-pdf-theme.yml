@@ -1,0 +1,60 @@
+name: Fix AMOLED PDF Theme
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/fix-amoled-pdf-theme.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Complete AMOLED PDF theme branches
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('app/src/main/java/com/foldbook/app/PdfReader.kt')
+          s = p.read_text(encoding='utf-8')
+
+          s = s.replace(
+          '''                ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)\n            }''',
+          '''                ReaderThemeOption.DARK -> Color(0xFFC8FF3D).copy(alpha = 0.42f)\n                ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)\n            }'''
+          )
+          s = s.replace(
+          '''                ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)\n            }''',
+          '''                ReaderThemeOption.DARK -> Color(0xFFD9FF65).copy(alpha = 0.16f)\n                ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)\n            }'''
+          )
+          s = s.replace(
+          '''            ReaderThemeOption.DARK -> Color(0xFF191919)\n        }''',
+          '''            ReaderThemeOption.DARK -> Color(0xFF191919)\n            ReaderThemeOption.AMOLED -> Color.Black\n        }'''
+          )
+
+          # We expect two markerColor blocks, two markerSheen blocks and two page-surface blocks.
+          if s.count('ReaderThemeOption.AMOLED -> Color(0xFFC8FF3D).copy(alpha = 0.46f)') != 2:
+              raise SystemExit('Expected two AMOLED markerColor branches')
+          if s.count('ReaderThemeOption.AMOLED -> Color(0xFFD9FF65).copy(alpha = 0.18f)') != 2:
+              raise SystemExit('Expected two AMOLED markerSheen branches')
+          if s.count('ReaderThemeOption.AMOLED -> Color.Black') < 3:
+              raise SystemExit('Expected AMOLED black page surfaces/background')
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit AMOLED PDF completion
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/PdfReader.kt
+          git diff --cached --quiet && exit 0
+          git commit -m "Complete AMOLED PDF theme"
+          git push origin development
