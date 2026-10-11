@@ -1,0 +1,30 @@
+name: Fix Cancel Smooth Return
+
+on:
+  push:
+    branches: [ "development" ]
+    paths: [ ".github/workflows/fix-cancel-smooth-return.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: development
+
+      - name: Apply smooth cancel return
+        run: python3 scripts/fix_cancel_smooth_return.py
+
+      - name: Commit patch
+        run: |
+          git config user.name "FoldBook Dev Bot"
+          git config user.email "actions@github.com"
+          git add app/src/main/java/com/foldbook/app/MainActivity.kt \
+                  app/src/main/java/com/foldbook/app/PdfReader.kt \
+                  app/src/main/java/com/foldbook/app/PageCurl.kt
+          git commit -m "Smooth cancelled page-turn return"
+          git push origin HEAD:development
