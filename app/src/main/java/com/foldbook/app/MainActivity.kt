@@ -2055,6 +2055,7 @@ private fun BookSpread(
     var pageWidthPx by remember { mutableFloatStateOf(1f) }
     var pageHeightPx by remember { mutableFloatStateOf(1f) }
     var settling by remember { mutableStateOf(false) }
+    var cancelling by remember { mutableStateOf(false) }
     // Lock the gesture to one axis before a page turn begins. Vertical
     // swipes must never accidentally create a curl/cancel animation.
     var dragAxis by remember { mutableIntStateOf(0) } // 0 undecided, 1 horizontal, 2 vertical
@@ -2080,6 +2081,7 @@ private fun BookSpread(
 
         scope.launch {
             settling = true
+            cancelling = !shouldComplete
             settleAnimation.snapTo(start)
             settleAnimation.animateTo(
                 targetValue = if (shouldComplete) 1f else 0f,
@@ -2109,6 +2111,7 @@ private fun BookSpread(
                     dragYFraction = 0.5f
                     turnDirection = 0
                     settling = false
+                    cancelling = false
                 }
                 settleAnimation.snapTo(0f)
             } else {
@@ -2118,6 +2121,7 @@ private fun BookSpread(
                     dragYFraction = 0.5f
                     turnDirection = 0
                     settling = false
+                    cancelling = false
                 }
 
                 settleAnimation.snapTo(0f)
@@ -2322,7 +2326,8 @@ private fun BookSpread(
                     pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,
                     turnDirection = turnDirection,
                     progress = progress,
-                    curlY = dragYFraction
+                    curlY = dragYFraction,
+                    cancelling = cancelling
                 )
             } else {
                 SinglePageSpread(
@@ -2330,7 +2335,8 @@ private fun BookSpread(
                     pageIndex = if (turnDirection != 0) turnBaseIndex else pageIndex,
                     turnDirection = turnDirection,
                     progress = progress,
-                    curlY = dragYFraction
+                    curlY = dragYFraction,
+                    cancelling = cancelling
                 )
             }
         }
@@ -2343,10 +2349,12 @@ private fun TwoPageSpread(
     pageIndex: Int,
     turnDirection: Int,
     progress: Float,
-    curlY: Float
+    curlY: Float,
+    cancelling: Boolean
 ) {
     val isForward = turnDirection == 1
     val isBackward = turnDirection == -1
+    val revealCurrentUnderlay = cancelling && progress < 0.10f
 
     Row(
         modifier = Modifier.fillMaxSize(),
@@ -2361,11 +2369,14 @@ private fun TwoPageSpread(
                 .zIndex(if (isBackward) 3f else 0f)
         ) {
             val leftPage = if (isBackward) {
-                pages.getOrNull(pageIndex - 2)
+                if (revealCurrentUnderlay) pages.getOrNull(pageIndex)
+                else pages.getOrNull(pageIndex - 2)
             } else {
                 pages.getOrNull(pageIndex)
             }
-            val leftNumber = if (isBackward) pageIndex - 1 else pageIndex + 1
+            val leftNumber = if (isBackward) {
+                if (revealCurrentUnderlay) pageIndex + 1 else pageIndex - 1
+            } else pageIndex + 1
 
             BookPage(
                 page = leftPage,
@@ -2383,6 +2394,7 @@ private fun TwoPageSpread(
                     direction = -1,
                     curlY = curlY,
                     crossSpine = true,
+                    cancelling = cancelling,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -2400,11 +2412,14 @@ private fun TwoPageSpread(
                 .zIndex(if (isForward) 3f else 0f)
         ) {
             val rightPage = if (isForward) {
-                pages.getOrNull(pageIndex + 3)
+                if (revealCurrentUnderlay) pages.getOrNull(pageIndex + 1)
+                else pages.getOrNull(pageIndex + 3)
             } else {
                 pages.getOrNull(pageIndex + 1)
             }
-            val rightNumber = if (isForward) pageIndex + 4 else pageIndex + 2
+            val rightNumber = if (isForward) {
+                if (revealCurrentUnderlay) pageIndex + 2 else pageIndex + 4
+            } else pageIndex + 2
 
             BookPage(
                 page = rightPage,
@@ -2422,6 +2437,7 @@ private fun TwoPageSpread(
                     direction = 1,
                     curlY = curlY,
                     crossSpine = true,
+                    cancelling = cancelling,
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(4f)
@@ -2437,9 +2453,11 @@ private fun SinglePageSpread(
     pageIndex: Int,
     turnDirection: Int,
     progress: Float,
-    curlY: Float
+    curlY: Float,
+    cancelling: Boolean
 ) {
-    val targetIndex = when (turnDirection) {
+    val revealCurrentUnderlay = cancelling && progress < 0.10f
+    val targetIndex = if (revealCurrentUnderlay) pageIndex else when (turnDirection) {
         1 -> pageIndex + 1
         -1 -> pageIndex - 1
         else -> pageIndex
@@ -2465,6 +2483,7 @@ private fun SinglePageSpread(
                 progress = progress,
                 direction = turnDirection,
                 curlY = curlY,
+                cancelling = cancelling,
                 cameraDistanceValue = 70f,
                 modifier = Modifier
                     .fillMaxSize()
@@ -2484,6 +2503,7 @@ private fun TurningPage(
     progress: Float,
     direction: Int,
     curlY: Float,
+    cancelling: Boolean = false,
     crossSpine: Boolean = false,
     cameraDistanceValue: Float = 30f,
     modifier: Modifier = Modifier
@@ -2493,6 +2513,7 @@ private fun TurningPage(
         direction = direction,
         touchYFraction = curlY,
         crossSpine = crossSpine,
+        isCancelling = cancelling,
         modifier = modifier,
         front = {
             BookPage(

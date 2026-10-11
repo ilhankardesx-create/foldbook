@@ -40,6 +40,7 @@ internal fun PageCurl(
     direction: Int,
     touchYFraction: Float,
     crossSpine: Boolean,
+    isCancelling: Boolean = false,
     modifier: Modifier = Modifier,
     front: @Composable () -> Unit,
     back: @Composable () -> Unit
@@ -145,8 +146,12 @@ internal fun PageCurl(
             // which looked like a white flash. Keep the exact live page underneath
             // and gradually fade the nearly-flat mesh away during the last 10%.
             val cancelBlendEnd = 0.10f
-            val meshOpacity = smootherStep((p / cancelBlendEnd).coerceIn(0f, 1f))
-            if (p < cancelBlendEnd) {
+            val meshOpacity = if (isCancelling) {
+                smootherStep((p / cancelBlendEnd).coerceIn(0f, 1f))
+            } else {
+                1f
+            }
+            if (isCancelling && p < cancelBlendEnd) {
                 drawLayer(frontLayer)
             }
 

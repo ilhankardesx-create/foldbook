@@ -837,6 +837,7 @@ private fun PdfSpread(
     var pageWidthPx by remember { mutableFloatStateOf(900f) }
     var pageHeightPx by remember { mutableFloatStateOf(1200f) }
     var settling by remember { mutableStateOf(false) }
+    var cancelling by remember { mutableStateOf(false) }
     // Lock the gesture to one axis before a page turn begins. Vertical
     // swipes must never accidentally create a curl/cancel animation.
     var dragAxis by remember { mutableIntStateOf(0) } // 0 undecided, 1 horizontal, 2 vertical
@@ -904,6 +905,7 @@ private fun PdfSpread(
 
         scope.launch {
             settling = true
+            cancelling = !shouldComplete
             settleAnimation.snapTo(start)
             settleAnimation.animateTo(
                 targetValue = if (shouldComplete) {
@@ -936,6 +938,7 @@ private fun PdfSpread(
                     dragProgress = 0f
                     turnDirection = 0
                     settling = false
+                    cancelling = false
                 }
             } else {
                 Snapshot.withMutableSnapshot {
@@ -943,6 +946,7 @@ private fun PdfSpread(
                     dragProgress = 0f
                     turnDirection = 0
                     settling = false
+                    cancelling = false
                 }
             }
             settleAnimation.snapTo(0f)
@@ -1177,7 +1181,8 @@ private fun PdfSpread(
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
-                onHighlightsChanged = onHighlightsChanged
+                onHighlightsChanged = onHighlightsChanged,
+                cancelling = cancelling
             )
         } else {
             PdfSinglePageSpread(
@@ -1191,7 +1196,8 @@ private fun PdfSpread(
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
-                onHighlightsChanged = onHighlightsChanged
+                onHighlightsChanged = onHighlightsChanged,
+                cancelling = cancelling
             )
         }
     }
@@ -1209,10 +1215,12 @@ private fun PdfTwoPageSpread(
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
-    onHighlightsChanged: () -> Unit
+    onHighlightsChanged: () -> Unit,
+    cancelling: Boolean
 ) {
     val isForward = turnDirection == 1
     val isBackward = turnDirection == -1
+    val revealCurrentUnderlay = cancelling && progress < 0.10f
 
     Row(
         modifier = Modifier.fillMaxSize(),
@@ -1226,7 +1234,9 @@ private fun PdfTwoPageSpread(
                 .padding(vertical = 4.dp)
                 .zIndex(if (isBackward) 3f else 0f)
         ) {
-            val leftIndex = if (isBackward) pageIndex - 2 else pageIndex
+            val leftIndex = if (isBackward) {
+                if (revealCurrentUnderlay) pageIndex else pageIndex - 2
+            } else pageIndex
             PdfStablePage(
                 document = document,
                 bookKey = bookKey,
@@ -1251,6 +1261,7 @@ private fun PdfTwoPageSpread(
                     renderWidthPx = renderWidthPx,
                     highlights = highlights,
                     crossSpine = true,
+                    cancelling = cancelling,
                     modifier = Modifier.fillMaxSize().zIndex(4f)
                 )
             }
@@ -1265,7 +1276,9 @@ private fun PdfTwoPageSpread(
                 .padding(vertical = 4.dp)
                 .zIndex(if (isForward) 3f else 0f)
         ) {
-            val rightIndex = if (isForward) pageIndex + 3 else pageIndex + 1
+            val rightIndex = if (isForward) {
+                if (revealCurrentUnderlay) pageIndex + 1 else pageIndex + 3
+            } else pageIndex + 1
             PdfStablePage(
                 document = document,
                 bookKey = bookKey,
@@ -1290,6 +1303,7 @@ private fun PdfTwoPageSpread(
                     renderWidthPx = renderWidthPx,
                     highlights = highlights,
                     crossSpine = true,
+                    cancelling = cancelling,
                     modifier = Modifier.fillMaxSize().zIndex(4f)
                 )
             }
@@ -1373,9 +1387,11 @@ private fun PdfSinglePageSpread(
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
-    onHighlightsChanged: () -> Unit
+    onHighlightsChanged: () -> Unit,
+    cancelling: Boolean
 ) {
-    val targetIndex = when (turnDirection) {
+    val revealCurrentUnderlay = cancelling && progress < 0.10f
+    val targetIndex = if (revealCurrentUnderlay) pageIndex else when (turnDirection) {
         1 -> pageIndex + 1
         -1 -> pageIndex - 1
         else -> pageIndex
@@ -1409,6 +1425,7 @@ private fun PdfSinglePageSpread(
                 theme = theme,
                 renderWidthPx = renderWidthPx,
                 highlights = highlights,
+                cancelling = cancelling,
                 modifier = Modifier.fillMaxSize().zIndex(4f)
             )
         }
@@ -1425,6 +1442,7 @@ private fun PdfSingleTurningPage(
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
+    cancelling: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val bitmap = remember(document, frontIndex, renderWidthPx, theme) {
@@ -1436,6 +1454,7 @@ private fun PdfSingleTurningPage(
         direction = direction,
         touchYFraction = curlY,
         crossSpine = false,
+        isCancelling = cancelling,
         modifier = modifier,
         front = {
             PdfFrozenPage(
@@ -1476,6 +1495,7 @@ private fun PdfTurningPage(
     theme: ReaderThemeOption,
     renderWidthPx: Int,
     highlights: List<BookHighlight>,
+    cancelling: Boolean = false,
     cameraDistanceValue: Float = 30f,
     crossSpine: Boolean = false,
     modifier: Modifier = Modifier
@@ -1496,6 +1516,7 @@ private fun PdfTurningPage(
         direction = direction,
         touchYFraction = curlY,
         crossSpine = crossSpine,
+        isCancelling = cancelling,
         modifier = modifier,
         front = {
             PdfFrozenPage(
