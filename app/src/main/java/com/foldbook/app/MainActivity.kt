@@ -2038,7 +2038,8 @@ private fun ReaderScreen(
                                     listOf(
                                         ReaderThemeOption.LIGHT to "Açık",
                                         ReaderThemeOption.SEPIA to "Sepya",
-                                        ReaderThemeOption.DARK to "Koyu"
+                                        ReaderThemeOption.DARK to "Koyu",
+                                    ReaderThemeOption.AMOLED to "AMOLED"
                                     ).forEach { (option, label) ->
                                         Button(
                                             onClick = {
