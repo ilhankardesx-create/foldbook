@@ -1410,10 +1410,17 @@ private fun PdfSinglePageSpread(
         else -> pageIndex
     }
 
+    val screenShape = singlePageDeviceShape(
+        fallbackRadius = 7.dp,
+        horizontalInset = 2.dp,
+        verticalInset = 3.dp
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 2.dp, vertical = 3.dp)
+            .clip(screenShape)
     ) {
         PdfPage(
             document = document,

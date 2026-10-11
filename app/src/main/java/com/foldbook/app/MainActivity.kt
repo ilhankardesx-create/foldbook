@@ -2505,15 +2505,22 @@ private fun SinglePageSpread(
         else -> pageIndex
     }
 
+    val screenShape = singlePageDeviceShape(
+        fallbackRadius = 10.dp,
+        horizontalInset = 3.dp,
+        verticalInset = 4.dp
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 3.dp, vertical = 4.dp)
             .shadow(
                 elevation = 7.dp,
-                shape = RoundedCornerShape(10.dp),
+                shape = screenShape,
                 clip = false
             )
+            .clip(screenShape)
     ) {
         BookPage(
             page = pages.getOrNull(targetIndex),
