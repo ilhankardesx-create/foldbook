@@ -117,7 +117,7 @@ private class PdfBookDocument(
     uri: Uri
 ) : Closeable {
     private val descriptor: ParcelFileDescriptor =
-        context.contentResolver.openFileDescriptor(uri, "r")
+        context.openBookFileDescriptor(uri, "r")
             ?: error("PDF açılamadı.")
     private val renderer = PdfRenderer(descriptor)
 

@@ -24,7 +24,7 @@ data class EpubChapter(
 object EpubLoader {
 
     fun load(context: Context, uri: Uri): EpubBook {
-        val entries = context.contentResolver.openInputStream(uri)?.use { input ->
+        val entries = context.openBookInputStream(uri)?.use { input ->
             ZipInputStream(input.buffered()).use { zip ->
                 val result = linkedMapOf<String, ByteArray>()
 
@@ -95,7 +95,7 @@ object EpubLoader {
 
     private fun readZipEntry(context: Context, uri: Uri, targetPath: String): ByteArray? {
         val normalizedTarget = normalizePath(targetPath)
-        return context.contentResolver.openInputStream(uri)?.use { input ->
+        return context.openBookInputStream(uri)?.use { input ->
             ZipInputStream(input.buffered()).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break

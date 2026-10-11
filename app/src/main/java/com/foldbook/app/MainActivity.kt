@@ -11,7 +11,10 @@ import android.speech.tts.UtteranceProgressListener
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -604,6 +607,44 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
         }
     }
 
+    val allFilesAccessLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+            Environment.isExternalStorageManager()
+        ) {
+            scanDeviceBooks()
+        } else {
+            Toast.makeText(
+                context,
+                "Dosya erişim izni verilmedi.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    fun scanDeviceBooksWithPermission() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            !Environment.isExternalStorageManager()
+        ) {
+            val appSettings = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            )
+            try {
+                allFilesAccessLauncher.launch(appSettings)
+            } catch (_: Exception) {
+                allFilesAccessLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                )
+            }
+        } else {
+            scanDeviceBooks()
+        }
+    }
+
     LaunchedEffect(Unit) {
         LibraryStore.savedFolder(context)?.let { scanFolder(it) }
 
@@ -650,7 +691,7 @@ private fun FoldBookApp(hasSeparatingVerticalHinge: Boolean) {
             onRefresh = {
                 LibraryStore.savedFolder(context)?.let { scanFolder(it) }
             },
-            onScanDevice = ::scanDeviceBooks,
+            onScanDevice = ::scanDeviceBooksWithPermission,
             onBookClick = ::openBook,
             onToggleFavorite = ::toggleFavorite,
             onRenameBook = ::renameBook,
