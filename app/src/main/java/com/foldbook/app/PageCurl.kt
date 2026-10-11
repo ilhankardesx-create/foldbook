@@ -133,7 +133,10 @@ internal fun PageCurl(
                 return@Canvas
             }
 
-            if (p <= 0.001f) {
+            // During the last tiny part of a cancelled turn, draw the exact live
+            // front page instead of a nearly-flat mesh. This makes the overlay and
+            // the resting page pixel-identical and removes the cancel flash.
+            if (p <= 0.025f) {
                 drawLayer(frontLayer)
                 return@Canvas
             }

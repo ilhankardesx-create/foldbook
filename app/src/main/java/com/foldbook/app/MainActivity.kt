@@ -2055,6 +2055,11 @@ private fun BookSpread(
     var pageWidthPx by remember { mutableFloatStateOf(1f) }
     var pageHeightPx by remember { mutableFloatStateOf(1f) }
     var settling by remember { mutableStateOf(false) }
+    // Lock the gesture to one axis before a page turn begins. Vertical
+    // swipes must never accidentally create a curl/cancel animation.
+    var dragAxis by remember { mutableIntStateOf(0) } // 0 undecided, 1 horizontal, 2 vertical
+    var gestureDx by remember { mutableFloatStateOf(0f) }
+    var gestureDy by remember { mutableFloatStateOf(0f) }
 
     val settleAnimation = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -2190,37 +2195,77 @@ private fun BookSpread(
                     dragYFraction = (startOffset.y / pageHeightPx).coerceIn(0.06f, 0.94f)
                     turnBaseIndex = pageIndex
                     turnDirection = 0
+                    dragAxis = 0
+                    gestureDx = 0f
+                    gestureDy = 0f
                 },
                 onDrag = { change, dragAmount ->
-                    change.consume()
+                    gestureDx += dragAmount.x
+                    gestureDy += dragAmount.y
 
-                    dragYFraction = (change.position.y / pageHeightPx)
-                        .coerceIn(0.06f, 0.94f)
-
-                    val proposed = (dragPx + dragAmount.x)
-                        .coerceIn(-pageWidthPx, pageWidthPx)
-
-                    val direction = when {
-                        proposed < 0f -> 1
-                        proposed > 0f -> -1
-                        else -> 0
+                    if (dragAxis == 0) {
+                        val absX = abs(gestureDx)
+                        val absY = abs(gestureDy)
+                        dragAxis = when {
+                            absY > absX * 1.15f -> 2
+                            absX > absY * 1.15f -> 1
+                            else -> 0
+                        }
                     }
 
-                    if (direction == 0 || canTurn(direction)) {
-                        dragPx = proposed
-                        turnDirection = direction
-                        dragProgress = (abs(dragPx) / pageWidthPx).coerceIn(0f, 1f)
+                    if (dragAxis == 2) {
+                        dragPx = 0f
+                        dragProgress = 0f
+                        turnDirection = 0
+                    } else if (dragAxis == 1) {
+                        change.consume()
+                        dragYFraction = (change.position.y / pageHeightPx)
+                            .coerceIn(0.06f, 0.94f)
+
+                        val proposed = gestureDx.coerceIn(-pageWidthPx, pageWidthPx)
+                        val direction = when {
+                            proposed < 0f -> 1
+                            proposed > 0f -> -1
+                            else -> 0
+                        }
+
+                        if (direction == 0 || canTurn(direction)) {
+                            dragPx = proposed
+                            turnDirection = direction
+                            dragProgress = (abs(dragPx) / pageWidthPx).coerceIn(0f, 1f)
+                        } else {
+                            dragPx = 0f
+                            dragProgress = 0f
+                            turnDirection = 0
+                        }
+                    }
+                },
+                onDragEnd = {
+                    val horizontalTurn = dragAxis == 1 && turnDirection != 0
+                    dragAxis = 0
+                    gestureDx = 0f
+                    gestureDy = 0f
+                    if (horizontalTurn) {
+                        settleTurn()
                     } else {
-                        dragPx = proposed.coerceIn(
-                            -pageWidthPx * 0.06f,
-                            pageWidthPx * 0.06f
-                        )
+                        dragPx = 0f
                         dragProgress = 0f
                         turnDirection = 0
                     }
                 },
-                onDragEnd = { settleTurn() },
-                onDragCancel = { settleTurn(cancelOnly = true) }
+                onDragCancel = {
+                    val horizontalTurn = dragAxis == 1 && turnDirection != 0
+                    dragAxis = 0
+                    gestureDx = 0f
+                    gestureDy = 0f
+                    if (horizontalTurn) {
+                        settleTurn(cancelOnly = true)
+                    } else {
+                        dragPx = 0f
+                        dragProgress = 0f
+                        turnDirection = 0
+                    }
+                }
             )
         }
         .pointerInput(bookKey, pageIndex, twoPage) {
