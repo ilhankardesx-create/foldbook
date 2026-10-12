@@ -383,6 +383,12 @@ object LibraryStore {
             if (prefs.getString(KEY_ACTIVE_BOOK_URI, null) == book.uri) {
                 prefs.edit().putString(KEY_ACTIVE_BOOK_TITLE, safeTitle).apply()
             }
+            migrateNotes(
+                context = context,
+                oldUri = book.uri,
+                newUri = book.uri,
+                newTitle = safeTitle
+            )
             return book.uri
         }
 
@@ -401,7 +407,15 @@ object LibraryStore {
             .lowercase()
 
         val newFileName = "$safeTitle.$extension"
-        if (originalName == newFileName) return book.uri
+        if (originalName == newFileName) {
+            migrateNotes(
+                context = context,
+                oldUri = book.uri,
+                newUri = book.uri,
+                newTitle = safeTitle
+            )
+            return book.uri
+        }
 
         val oldUri = book.uri
         val oldProgress = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -426,7 +440,10 @@ object LibraryStore {
             }
         }
 
-        if (prefs.getString(KEY_ACTIVE_BOOK_TITLE, null) == book.title) {
+        if (
+            prefs.getString(KEY_ACTIVE_BOOK_URI, null) == oldUri ||
+            prefs.getString(KEY_ACTIVE_BOOK_TITLE, null) == book.title
+        ) {
             editor.putString(KEY_ACTIVE_BOOK_TITLE, safeTitle)
         }
         editor.apply()
@@ -436,6 +453,12 @@ object LibraryStore {
             setFavorite(context, newUri, true)
         }
         if (newUri != oldUri) migrateHighlights(context, oldUri, newUri)
+        migrateNotes(
+            context = context,
+            oldUri = oldUri,
+            newUri = newUri,
+            newTitle = safeTitle
+        )
 
         return newUri
     }
@@ -506,7 +529,7 @@ object LibraryStore {
             BookNote(
                 id = now.toString() + "-" + cleanText.hashCode().toString(),
                 bookUri = bookUri,
-                bookTitle = bookTitle.ifBlank { "Kitap" },
+                bookTitle = preferredNoteTitle(context, bookUri, bookTitle),
                 pageNumber = pageNumber.coerceAtLeast(1),
                 text = cleanText,
                 createdAt = now
@@ -516,9 +539,11 @@ object LibraryStore {
     }
 
     fun readNotes(context: Context): List<BookNote> {
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_NOTES_JSON, "[]")
-            .orEmpty()
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_NOTES_JSON, "[]").orEmpty()
+        val activeUri = prefs.getString(KEY_ACTIVE_BOOK_URI, null).orEmpty()
+        val activeTitle = prefs.getString(KEY_ACTIVE_BOOK_TITLE, null).orEmpty()
+        val pickedTitles = readPickedBooks(context).associate { it.uri to it.title }
 
         return runCatching {
             val array = JSONArray(raw.ifBlank { "[]" })
@@ -527,13 +552,26 @@ object LibraryStore {
                     val item = array.optJSONObject(index) ?: continue
                     val text = item.optString("text").trim()
                     if (text.isBlank()) continue
+
+                    val bookUri = item.optString("bookUri")
+                    val storedTitle = item.optString("bookTitle").ifBlank { "Kitap" }
+                    val resolvedTitle = when {
+                        bookUri.isNotBlank() && bookUri == activeUri && activeTitle.isNotBlank() -> {
+                            activeTitle
+                        }
+                        bookUri.isNotBlank() && !pickedTitles[bookUri].isNullOrBlank() -> {
+                            pickedTitles.getValue(bookUri)
+                        }
+                        else -> cleanNoteTitle(storedTitle)
+                    }
+
                     add(
                         BookNote(
                             id = item.optString("id").ifBlank {
                                 item.optLong("createdAt").toString() + "-" + index
                             },
-                            bookUri = item.optString("bookUri"),
-                            bookTitle = item.optString("bookTitle").ifBlank { "Kitap" },
+                            bookUri = bookUri,
+                            bookTitle = resolvedTitle,
                             pageNumber = item.optInt("pageNumber", 1).coerceAtLeast(1),
                             text = text,
                             createdAt = item.optLong("createdAt", 0L)
@@ -566,6 +604,63 @@ object LibraryStore {
             .edit()
             .putString(KEY_NOTES_JSON, array.toString())
             .apply()
+    }
+
+    private fun preferredNoteTitle(
+        context: Context,
+        bookUri: String,
+        fallbackTitle: String
+    ): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString(KEY_ACTIVE_BOOK_URI, null) == bookUri) {
+            val activeTitle = prefs.getString(KEY_ACTIVE_BOOK_TITLE, null).orEmpty().trim()
+            if (activeTitle.isNotBlank()) return activeTitle
+        }
+
+        readPickedBooks(context)
+            .firstOrNull { it.uri == bookUri }
+            ?.title
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+
+        return cleanNoteTitle(fallbackTitle)
+    }
+
+    private fun cleanNoteTitle(rawTitle: String): String {
+        val trimmed = rawTitle.trim()
+        val withoutExtension = when {
+            trimmed.endsWith(".epub", ignoreCase = true) -> trimmed.dropLast(5)
+            trimmed.endsWith(".pdf", ignoreCase = true) -> trimmed.dropLast(4)
+            else -> trimmed
+        }
+
+        return withoutExtension
+            .replace(Regex("^\\d+[\\s_-]+"), "")
+            .replace('_', ' ')
+            .replace('-', ' ')
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { "Kitap" }
+    }
+
+    private fun migrateNotes(
+        context: Context,
+        oldUri: String,
+        newUri: String,
+        newTitle: String
+    ) {
+        val updated = readNotes(context).map { note ->
+            if (note.bookUri == oldUri) {
+                note.copy(
+                    bookUri = newUri,
+                    bookTitle = newTitle
+                )
+            } else {
+                note
+            }
+        }
+        saveNotes(context, updated)
     }
 
     fun addHighlight(
