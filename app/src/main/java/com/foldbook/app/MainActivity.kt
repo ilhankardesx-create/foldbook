@@ -790,80 +790,17 @@ private fun LibraryScreen(
     }
 
     if (notesVisible) {
-        AlertDialog(
-            onDismissRequest = { notesVisible = false },
-            title = {
-                Text(
-                    text = "Notlar",
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                if (notes.isEmpty()) {
-                    Text(
-                        text = "Henüz not eklenmemiş.",
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
-                    )
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 480.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        notes.forEach { note ->
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surface
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = note.bookTitle,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
-                                    )
-
-                                    Text(
-                                        text = "Sayfa ${note.pageNumber}",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
-                                    )
-
-                                    Text(
-                                        text = note.text,
-                                        fontSize = 14.sp,
-                                        lineHeight = 20.sp
-                                    )
-
-                                    TextButton(
-                                        onClick = {
-                                            LibraryStore.deleteNote(context, note.id)
-                                            notes = LibraryStore.readNotes(context)
-                                        }
-                                    ) {
-                                        Text(
-                                            text = "Notu Sil",
-                                            color = MaterialTheme.colorScheme.error
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { notesVisible = false }) {
-                    Text("Kapat")
-                }
-            }
-        )
-    }
+    NotebookScreen(
+        notes = notes,
+        books = books,
+        onBack = { notesVisible = false },
+        onDeleteNote = { noteId ->
+            LibraryStore.deleteNote(context, noteId)
+            notes = LibraryStore.readNotes(context)
+        }
+    )
+    return
+}
 
     actionBook?.let { book ->
         AlertDialog(
@@ -1109,7 +1046,7 @@ private fun LibraryScreen(
                         notesVisible = true
                     }
                 ) {
-                    Text("Notlar")
+                    Text("Not Defteri")
                 }
 
                 TextButton(
@@ -1268,7 +1205,7 @@ private fun LibraryScreen(
                             )
 
                             Text(
-                                text = "v0.9.32",
+                                text = "v0.9.33",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f)
                             )
@@ -1862,7 +1799,7 @@ private fun ReaderScreen(
                             )
                             Toast.makeText(
                                 context,
-                                "Notlara eklendi.",
+                                "Not Defterine eklendi.",
                                 Toast.LENGTH_SHORT
                             ).show()
                         },
@@ -2787,7 +2724,7 @@ private fun BookPage(
                                     )
                                 }
                             ) {
-                                Text("Notlara Ekle")
+                                Text("Not Defterine Ekle")
                             }
 
                             Button(
