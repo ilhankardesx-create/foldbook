@@ -2,14 +2,14 @@ name: Apply responsive library header
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Apply responsive header patch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch library header
+      - name: Patch library header safely
         shell: bash
         run: |
           python3 - <<'PY'
@@ -25,6 +25,10 @@ jobs:
 
           path = Path("app/src/main/java/com/foldbook/app/MainActivity.kt")
           text = path.read_text(encoding="utf-8")
+
+          if "val veryCompactHeader = maxWidth < 360.dp" in text:
+              print("Responsive header is already present; nothing to change.")
+              raise SystemExit(0)
 
           old = '''            Row(
                 modifier = Modifier
@@ -174,11 +178,14 @@ jobs:
           PY
 
           git diff --check
-          git diff -- app/src/main/java/com/foldbook/app/MainActivity.kt
 
-      - name: Commit responsive header
+      - name: Commit if changed
         shell: bash
         run: |
+          if git diff --quiet -- app/src/main/java/com/foldbook/app/MainActivity.kt; then
+            echo "No source change required."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/foldbook/app/MainActivity.kt
