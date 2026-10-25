@@ -1,4 +1,4 @@
-name: Apply responsive library header
+name: Format responsive library header
 
 on:
   push:
@@ -17,38 +17,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch library header safely
+      - name: Normalize responsive header formatting
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          from textwrap import dedent, indent
 
           path = Path("app/src/main/java/com/foldbook/app/MainActivity.kt")
           text = path.read_text(encoding="utf-8")
+          marker = "val veryCompactHeader = maxWidth < 360.dp"
+          marker_pos = text.find(marker)
+          if marker_pos < 0:
+              raise SystemExit("Responsive header marker not found; refusing to modify anything.")
 
-          responsive_marker = "val veryCompactHeader = maxWidth < 360.dp"
-          if responsive_marker in text:
-              print("Responsive header is already present; nothing to change.")
-              raise SystemExit(0)
-
-          anchor = '                    text = "Kütüphane",'
-          if text.count(anchor) != 1:
-              raise SystemExit("Kütüphane header anchor was not uniquely found; refusing to modify anything.")
-
-          anchor_pos = text.index(anchor)
-          start = text.rfind("            Row(\n", 0, anchor_pos)
+          start = text.rfind("            BoxWithConstraints(\n", 0, marker_pos)
           end_marker = "\n\n            OutlinedTextField("
-          end = text.find(end_marker, anchor_pos)
-
+          end = text.find(end_marker, marker_pos)
           if start < 0 or end < 0:
-              raise SystemExit("Library header boundaries were not found; refusing to modify anything.")
+              raise SystemExit("Responsive header boundaries not found; refusing to modify anything.")
 
-          old_block = text[start:end]
-          for required in ('Text("Not Defteri")', 'Text("Ayarlar")', 'Text("Destek")'):
-              if required not in old_block:
-                  raise SystemExit(f"Expected {required} inside library header; refusing to modify anything.")
-
-          new_block = '''            BoxWithConstraints(
+          clean = dedent('''\
+          BoxWithConstraints(
               modifier = Modifier.fillMaxWidth()
           ) {
               val veryCompactHeader = maxWidth < 360.dp
@@ -142,7 +132,13 @@ jobs:
                       )
                   }
               }
-          }'''
+          }
+          ''')
+          new_block = indent(clean.rstrip("\n"), "            ")
+
+          if text[start:end] == new_block:
+              print("Responsive header formatting is already clean.")
+              raise SystemExit(0)
 
           path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
           PY
@@ -159,5 +155,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/foldbook/app/MainActivity.kt
-          git commit -m "Make library header responsive"
+          git commit -m "Format responsive library header"
           git push origin HEAD:main
