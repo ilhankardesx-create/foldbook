@@ -29,27 +29,27 @@ class SupportBillingManager(
 ) : PurchasesUpdatedListener {
 
     companion object {
-        const val PRODUCT_CHOCOLATE = "foldbook_support_chocolate"
-        const val PRODUCT_COFFEE = "foldbook_support_coffee"
-        const val PRODUCT_DOUBLE_COFFEE = "foldbook_support_double_coffee"
+        const val PRODUCT_SUPPORT_50 = "foldbook_support_50"
+        const val PRODUCT_SUPPORT_100 = "foldbook_support_100"
+        const val PRODUCT_SUPPORT_200 = "foldbook_support_200"
 
         private val baseProducts = listOf(
             SupportProduct(
-                productId = PRODUCT_CHOCOLATE,
-                emoji = "🍫",
-                title = "1 Çikolata",
+                productId = PRODUCT_SUPPORT_50,
+                emoji = "☕",
+                title = "Küçük Destek",
                 priceLabel = "50 TL"
             ),
             SupportProduct(
-                productId = PRODUCT_COFFEE,
-                emoji = "☕",
-                title = "1 Kahve",
+                productId = PRODUCT_SUPPORT_100,
+                emoji = "❤️",
+                title = "Destek",
                 priceLabel = "100 TL"
             ),
             SupportProduct(
-                productId = PRODUCT_DOUBLE_COFFEE,
-                emoji = "☕☕",
-                title = "2 Kahve",
+                productId = PRODUCT_SUPPORT_200,
+                emoji = "🚀",
+                title = "Büyük Destek",
                 priceLabel = "200 TL"
             )
         )
@@ -91,6 +91,7 @@ class SupportBillingManager(
                         queryExistingPurchases()
                     } else {
                         _ready.value = false
+                        _message.value = "Google Play ödeme servisine bağlanılamadı."
                     }
                 }
 
@@ -102,9 +103,7 @@ class SupportBillingManager(
     }
 
     fun close() {
-        if (billingClient.isReady) {
-            billingClient.endConnection()
-        }
+        billingClient.endConnection()
     }
 
     fun clearMessage() {
@@ -112,12 +111,17 @@ class SupportBillingManager(
     }
 
     fun purchase(productId: String) {
+        if (!billingClient.isReady) {
+            _message.value = "Google Play ödeme servisi henüz hazır değil."
+            return
+        }
+
         val supportProduct = _products.value.firstOrNull { it.productId == productId }
         val details = supportProduct?.productDetails
 
         if (details == null) {
             _message.value =
-                "Bu destek ürünü Google Play Console'da etkinleştirildiğinde ödeme açılacak."
+                "Bu destek seçeneği Google Play Console'da etkinleştirildiğinde ödeme açılacak."
             return
         }
 
@@ -127,14 +131,10 @@ class SupportBillingManager(
             return
         }
 
-        val productParamsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder()
+        val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(details)
-
-        offer.offerToken?.takeIf { it.isNotBlank() }?.let { token ->
-            productParamsBuilder.setOfferToken(token)
-        }
-
-        val productParams = productParamsBuilder.build()
+            .setOfferToken(offer.offerToken)
+            .build()
 
         val flowParams = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(listOf(productParams))
@@ -164,8 +164,18 @@ class SupportBillingManager(
             }
 
             val detailsById = queryResult.productDetailsList.associateBy { it.productId }
+
             _products.value = baseProducts.map { item ->
-                item.copy(productDetails = detailsById[item.productId])
+                val details = detailsById[item.productId]
+                val playPrice = details
+                    ?.oneTimePurchaseOfferDetailsList
+                    ?.firstOrNull()
+                    ?.formattedPrice
+
+                item.copy(
+                    priceLabel = playPrice ?: item.priceLabel,
+                    productDetails = details
+                )
             }
         }
     }
@@ -193,6 +203,10 @@ class SupportBillingManager(
 
             BillingClient.BillingResponseCode.USER_CANCELED -> {
                 _message.value = "Ödeme iptal edildi."
+            }
+
+            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
+                queryExistingPurchases()
             }
 
             else -> {
@@ -223,6 +237,7 @@ class SupportBillingManager(
         billingClient.consumeAsync(consumeParams) { result, _ ->
             if (result.responseCode == BillingClient.BillingResponseCode.OK) {
                 _message.value = "Desteğin için çok teşekkürler ❤️"
+                queryProducts()
             } else {
                 _message.value =
                     "Ödeme alındı. Google Play işlemi tamamlamaya devam ediyor."
