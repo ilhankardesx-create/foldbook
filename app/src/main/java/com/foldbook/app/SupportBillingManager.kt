@@ -131,13 +131,15 @@ class SupportBillingManager(
             return
         }
 
-        val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
+        val productParamsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(details)
-            .setOfferToken(offer.offerToken)
-            .build()
+
+        offer.offerToken?.takeIf { it.isNotBlank() }?.let { token ->
+            productParamsBuilder.setOfferToken(token)
+        }
 
         val flowParams = BillingFlowParams.newBuilder()
-            .setProductDetailsParamsList(listOf(productParams))
+            .setProductDetailsParamsList(listOf(productParamsBuilder.build()))
             .build()
 
         val result = billingClient.launchBillingFlow(activity, flowParams)
