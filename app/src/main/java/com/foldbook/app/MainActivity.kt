@@ -1023,47 +1023,101 @@ private fun LibraryScreen(
                 .fillMaxSize()
                 .padding(top = 28.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Kütüphane",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 19.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    softWrap = false,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+            BoxWithConstraints(
+    modifier = Modifier.fillMaxWidth()
+) {
+    val veryCompactHeader = maxWidth < 360.dp
+    val compactHeader = maxWidth < 430.dp
+    val headerHorizontalPadding = when {
+        veryCompactHeader -> 8.dp
+        compactHeader -> 12.dp
+        else -> 16.dp
+    }
+    val headerButtonHorizontalPadding = when {
+        veryCompactHeader -> 2.dp
+        compactHeader -> 4.dp
+        else -> 8.dp
+    }
+    val headerMenuFontSize = when {
+        veryCompactHeader -> 12.sp
+        compactHeader -> 13.sp
+        else -> 14.sp
+    }
+    val headerTitleFontSize = when {
+        veryCompactHeader -> 17.sp
+        compactHeader -> 18.sp
+        else -> 19.sp
+    }
 
-                TextButton(
-                    onClick = {
-                        notes = LibraryStore.readNotes(context)
-                        notesVisible = true
-                    }
-                ) {
-                    Text("Not Defteri")
-                }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = headerHorizontalPadding, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Kütüphane",
+            modifier = Modifier.weight(1f),
+            fontSize = headerTitleFontSize,
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            color = MaterialTheme.colorScheme.onSurface
+        )
 
-                TextButton(
-                    onClick = { settingsVisible = !settingsVisible }
-                ) {
-                    Text("Ayarlar")
-                }
+        TextButton(
+            onClick = {
+                notes = LibraryStore.readNotes(context)
+                notesVisible = true
+            },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = headerButtonHorizontalPadding,
+                vertical = 8.dp
+            )
+        ) {
+            Text(
+                text = "Not Defteri",
+                fontSize = headerMenuFontSize,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
 
-                TextButton(
-                    onClick = {
-                        supportBilling.clearMessage()
-                        supportVisible = true
-                    }
-                ) {
-                    Text("Destek")
-                }
-            }
+        TextButton(
+            onClick = { settingsVisible = !settingsVisible },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = headerButtonHorizontalPadding,
+                vertical = 8.dp
+            )
+        ) {
+            Text(
+                text = "Ayarlar",
+                fontSize = headerMenuFontSize,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+
+        TextButton(
+            onClick = {
+                supportBilling.clearMessage()
+                supportVisible = true
+            },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = headerButtonHorizontalPadding,
+                vertical = 8.dp
+            )
+        ) {
+            Text(
+                text = "Destek",
+                fontSize = headerMenuFontSize,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+    }
+}
 
             OutlinedTextField(
                 value = searchQuery,
