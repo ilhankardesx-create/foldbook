@@ -26,155 +26,125 @@ jobs:
           path = Path("app/src/main/java/com/foldbook/app/MainActivity.kt")
           text = path.read_text(encoding="utf-8")
 
-          if "val veryCompactHeader = maxWidth < 360.dp" in text:
+          responsive_marker = "val veryCompactHeader = maxWidth < 360.dp"
+          if responsive_marker in text:
               print("Responsive header is already present; nothing to change.")
               raise SystemExit(0)
 
-          old = '''            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Kütüphane",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 19.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    softWrap = false,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+          anchor = '                    text = "Kütüphane",'
+          if text.count(anchor) != 1:
+              raise SystemExit("Kütüphane header anchor was not uniquely found; refusing to modify anything.")
 
-                TextButton(
-                    onClick = {
-                        notes = LibraryStore.readNotes(context)
-                        notesVisible = true
-                    }
-                ) {
-                    Text("Not Defteri")
-                }
+          anchor_pos = text.index(anchor)
+          start = text.rfind("            Row(\n", 0, anchor_pos)
+          end_marker = "\n\n            OutlinedTextField("
+          end = text.find(end_marker, anchor_pos)
 
-                TextButton(
-                    onClick = { settingsVisible = !settingsVisible }
-                ) {
-                    Text("Ayarlar")
-                }
+          if start < 0 or end < 0:
+              raise SystemExit("Library header boundaries were not found; refusing to modify anything.")
 
-                TextButton(
-                    onClick = {
-                        supportBilling.clearMessage()
-                        supportVisible = true
-                    }
-                ) {
-                    Text("Destek")
-                }
-            }
-'''
+          old_block = text[start:end]
+          for required in ('Text("Not Defteri")', 'Text("Ayarlar")', 'Text("Destek")'):
+              if required not in old_block:
+                  raise SystemExit(f"Expected {required} inside library header; refusing to modify anything.")
 
-          new = '''            BoxWithConstraints(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val veryCompactHeader = maxWidth < 360.dp
-                val compactHeader = maxWidth < 430.dp
-                val headerHorizontalPadding = when {
-                    veryCompactHeader -> 8.dp
-                    compactHeader -> 12.dp
-                    else -> 16.dp
-                }
-                val headerButtonHorizontalPadding = when {
-                    veryCompactHeader -> 2.dp
-                    compactHeader -> 4.dp
-                    else -> 8.dp
-                }
-                val headerMenuFontSize = when {
-                    veryCompactHeader -> 12.sp
-                    compactHeader -> 13.sp
-                    else -> 14.sp
-                }
-                val headerTitleFontSize = when {
-                    veryCompactHeader -> 17.sp
-                    compactHeader -> 18.sp
-                    else -> 19.sp
-                }
+          new_block = '''            BoxWithConstraints(
+              modifier = Modifier.fillMaxWidth()
+          ) {
+              val veryCompactHeader = maxWidth < 360.dp
+              val compactHeader = maxWidth < 430.dp
+              val headerHorizontalPadding = when {
+                  veryCompactHeader -> 8.dp
+                  compactHeader -> 12.dp
+                  else -> 16.dp
+              }
+              val headerButtonHorizontalPadding = when {
+                  veryCompactHeader -> 2.dp
+                  compactHeader -> 4.dp
+                  else -> 8.dp
+              }
+              val headerMenuFontSize = when {
+                  veryCompactHeader -> 12.sp
+                  compactHeader -> 13.sp
+                  else -> 14.sp
+              }
+              val headerTitleFontSize = when {
+                  veryCompactHeader -> 17.sp
+                  compactHeader -> 18.sp
+                  else -> 19.sp
+              }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = headerHorizontalPadding, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Kütüphane",
-                        modifier = Modifier.weight(1f),
-                        fontSize = headerTitleFontSize,
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+              Row(
+                  modifier = Modifier
+                      .fillMaxWidth()
+                      .padding(horizontal = headerHorizontalPadding, vertical = 10.dp),
+                  verticalAlignment = Alignment.CenterVertically
+              ) {
+                  Text(
+                      text = "Kütüphane",
+                      modifier = Modifier.weight(1f),
+                      fontSize = headerTitleFontSize,
+                      fontFamily = FontFamily.Serif,
+                      fontWeight = FontWeight.Bold,
+                      maxLines = 1,
+                      softWrap = false,
+                      color = MaterialTheme.colorScheme.onSurface
+                  )
 
-                    TextButton(
-                        onClick = {
-                            notes = LibraryStore.readNotes(context)
-                            notesVisible = true
-                        },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = headerButtonHorizontalPadding,
-                            vertical = 8.dp
-                        )
-                    ) {
-                        Text(
-                            text = "Not Defteri",
-                            fontSize = headerMenuFontSize,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
+                  TextButton(
+                      onClick = {
+                          notes = LibraryStore.readNotes(context)
+                          notesVisible = true
+                      },
+                      contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                          horizontal = headerButtonHorizontalPadding,
+                          vertical = 8.dp
+                      )
+                  ) {
+                      Text(
+                          text = "Not Defteri",
+                          fontSize = headerMenuFontSize,
+                          maxLines = 1,
+                          softWrap = false
+                      )
+                  }
 
-                    TextButton(
-                        onClick = { settingsVisible = !settingsVisible },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = headerButtonHorizontalPadding,
-                            vertical = 8.dp
-                        )
-                    ) {
-                        Text(
-                            text = "Ayarlar",
-                            fontSize = headerMenuFontSize,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
+                  TextButton(
+                      onClick = { settingsVisible = !settingsVisible },
+                      contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                          horizontal = headerButtonHorizontalPadding,
+                          vertical = 8.dp
+                      )
+                  ) {
+                      Text(
+                          text = "Ayarlar",
+                          fontSize = headerMenuFontSize,
+                          maxLines = 1,
+                          softWrap = false
+                      )
+                  }
 
-                    TextButton(
-                        onClick = {
-                            supportBilling.clearMessage()
-                            supportVisible = true
-                        },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = headerButtonHorizontalPadding,
-                            vertical = 8.dp
-                        )
-                    ) {
-                        Text(
-                            text = "Destek",
-                            fontSize = headerMenuFontSize,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
-            }
-'''
+                  TextButton(
+                      onClick = {
+                          supportBilling.clearMessage()
+                          supportVisible = true
+                      },
+                      contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                          horizontal = headerButtonHorizontalPadding,
+                          vertical = 8.dp
+                      )
+                  ) {
+                      Text(
+                          text = "Destek",
+                          fontSize = headerMenuFontSize,
+                          maxLines = 1,
+                          softWrap = false
+                      )
+                  }
+              }
+          }'''
 
-          count = text.count(old)
-          if count != 1:
-              raise SystemExit(f"Expected exactly one library header block, found {count}; refusing to modify anything.")
-
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
           PY
 
           git diff --check
